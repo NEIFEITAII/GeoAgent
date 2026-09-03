@@ -1,9 +1,6 @@
 """Agent 内置工具：所有 Agent 默认携带，与业务工具解耦。
 
 当前内置工具：
-- todo_write：任务清单（参考 Claude Code TodoWrite 的规划机制）。
-  整体替换式更新，校验上限 20 项、每项 content 非空、同一时间最多一个 in_progress；
-  更新结果同时通过 `todo` 事件推给前端渲染，状态存于 ConversationContext.todos。
 - task：子 Agent 委派（参考 s06），全新上下文运行嵌套 Agent，只返回最终文本。
 - list_skills / load_skill：技能按需加载（参考 s07），目录注入 system prompt，
   完整 SKILL.md 按需读取；名称走注册表，不做文件路径拼接。
@@ -11,52 +8,15 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
-from ..core.events import Event
 from ..skills import SkillNotFoundError
 from .registry import get_tools, register_tool
 from .result import Artifact, ToolResult
 
-MAX_TODO_ITEMS = 20
 MAX_SKILL_CHARS = 5000
-
-STATUS_MARKS: dict[str, str] = {
-    "pending": "[ ]",
-    "in_progress": "[>]",
-    "completed": "[x]",
-}
-
-
-class TodoItem(BaseModel):
-    """任务清单中的一项。"""
-
-    content: str = Field(description="Task description")
-    status: Literal["pending", "in_progress", "completed"] = Field(
-        default="pending",
-        description="Task status",
-    )
-
-
-class TodoWriteParams(BaseModel):
-    """todo_write 工具参数。"""
-
-    todos: list[TodoItem] = Field(
-        description="The full task list to replace the current one",
-    )
-
-    @model_validator(mode="after")
-    def validate_todo_list(self) -> "TodoWriteParams":
-        if len(self.todos) > MAX_TODO_ITEMS:
-            raise ValueError(f"todo list exceeds {MAX_TODO_ITEMS} items")
-        if sum(1 for t in self.todos if t.status == "in_progress") > 1:
-            raise ValueError("at most one item can be in_progress")
-        if any(not t.content.strip() for t in self.todos):
-            raise ValueError("todo content must be non-empty")
-        return self
-
 
 class TaskParams(BaseModel):
     """task 工具参数。"""
@@ -88,38 +48,9 @@ class CompactParams(BaseModel):
     """compact 工具参数（空）。"""
 
 
-def render_todos(todos: list[dict[str, str]]) -> str:
-    """把任务列表渲染成给 LLM / 前端的文本视图。"""
-    return "\n".join(
-        f"{STATUS_MARKS.get(t.get('status', 'pending'), '[ ]')} {t['content']}"
-        for t in todos
-    )
-
-
-@register_tool(
-    "todo_write",
-    (
-        "Create and manage a task list. Use it for multi-step tasks: write the full "
-        "list first, then update item statuses (pending / in_progress / completed) "
-        "as work progresses."
-    ),
-    TodoWriteParams,
-)
-async def todo_write(ctx: Any, todos: list[dict[str, str]]) -> ToolResult:
-    """更新任务清单（整体替换当前列表）。"""
-    ctx.todos = list(todos)
-    await ctx.emit(Event("todo", {"todos": list(ctx.todos)}))
-    rendered = render_todos(ctx.todos)
-    return ToolResult(
-        tool_call_id="",
-        name="todo_write",
-        content=f"任务清单已更新（{len(ctx.todos)} 项）：\n{rendered}",
-    )
-
-
 def get_builtin_tools() -> list[Any]:
-    """返回全部内置工具（当前：todo_write / task / list_skills / load_skill / compact）。"""
-    return get_tools("todo_write", "task", "list_skills", "load_skill", "compact")
+    """返回全部内置工具（当前：task / list_skills / load_skill / compact）。"""
+    return get_tools("task", "list_skills", "load_skill", "compact")
 
 
 @register_tool(

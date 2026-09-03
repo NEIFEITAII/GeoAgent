@@ -11,7 +11,14 @@
         :class="{ active: c.id === chat.currentId }"
         @click="onSelect(c.id)"
       >
-        <div class="conv-title">{{ c.title }}</div>
+        <div class="conv-title-row">
+          <div class="conv-title">{{ c.title }}</div>
+          <button
+            class="del-btn"
+            title="删除会话"
+            @click.stop="onDelete(c.id)"
+          >×</button>
+        </div>
         <div class="conv-meta">{{ c.model }} · {{ timeAgo(c.updated_at) }}</div>
       </li>
     </ul>
@@ -33,6 +40,15 @@ async function onSelect(id) {
 async function onNew() {
   try {
     await chat.createConversation()
+  } catch (err) {
+    chat.error = err.message
+  }
+}
+
+async function onDelete(id) {
+  if (!window.confirm('确定删除该会话吗？删除后不可恢复。')) return
+  try {
+    await chat.deleteConversation(id)
   } catch (err) {
     chat.error = err.message
   }

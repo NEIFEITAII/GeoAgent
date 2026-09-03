@@ -78,11 +78,44 @@ body {
   background: #1f2937;
 }
 
+.conv-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.del-btn {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.conv-list li:hover .del-btn,
+.conv-list li.active .del-btn {
+  opacity: 1;
+}
+
+.del-btn:hover {
+  background: #374151;
+  color: #f87171;
+}
+
 .conv-list li.active {
   background: #374151;
 }
 
 .conv-title {
+  flex: 1;
+  min-width: 0;
   font-size: 14px;
   white-space: nowrap;
   overflow: hidden;
@@ -186,18 +219,25 @@ body {
 
 .cursor {
   display: inline-block;
-  width: 2px;
-  height: 1em;
-  margin-left: 2px;
-  vertical-align: -2px;
-  background: #2563eb;
-  animation: blink 1s steps(2) infinite;
+  width: 12px;
+  height: 12px;
+  margin-left: 6px;
+  vertical-align: -1px;
+  border: 2px solid #bfdbfe;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
 
-@keyframes blink {
-  50% {
-    opacity: 0;
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
+}
+
+/* 分析进行中：消息区鼠标显示加载状态 */
+.chat.streaming .messages {
+  cursor: progress;
 }
 
 /* ---- 工具卡片与可视化 ---- */
@@ -363,39 +403,6 @@ body {
 .send-btn:disabled {
   background: #93c5fd;
   cursor: not-allowed;
-}
-
-/* ---- 任务清单 ---- */
-.msg-todos {
-  list-style: none;
-  margin: 4px 0 8px;
-  padding: 0;
-}
-
-.msg-todos li {
-  font-size: 13px;
-  color: #374151;
-  line-height: 1.6;
-}
-
-.todo-pending::before {
-  content: '○ ';
-  color: #9ca3af;
-}
-
-.todo-in_progress::before {
-  content: '◐ ';
-  color: #2563eb;
-}
-
-.todo-completed::before {
-  content: '● ';
-  color: #16a34a;
-}
-
-.todo-completed {
-  text-decoration: line-through;
-  color: #9ca3af !important;
 }
 
 /* ---- 子任务（subagent）---- */

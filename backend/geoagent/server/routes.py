@@ -87,6 +87,16 @@ async def switch_model(
     return conv
 
 
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: str, request: Request
+) -> dict[str, Any]:
+    store = _store(request)
+    _conversation_or_404(store, conversation_id)
+    store.delete(conversation_id)
+    return {"ok": True}
+
+
 @router.post("/conversations/{conversation_id}/messages")
 async def send_message(
     conversation_id: str,
@@ -108,6 +118,7 @@ async def send_message(
         memory=NoopMemory(),
         event_sink=None,
         skills=request.app.state.skills,
+        pg=request.app.state.pg,
         transcripts_dir=request.app.state.settings.data_dir / "transcripts",
     )
     try:
@@ -143,6 +154,7 @@ async def chat_ws(websocket: WebSocket, conversation_id: str) -> None:
         memory=NoopMemory(),
         event_sink=lambda event: _ws_send(websocket, event),
         skills=app.state.skills,
+        pg=app.state.pg,
         transcripts_dir=app.state.settings.data_dir / "transcripts",
     )
     try:

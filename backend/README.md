@@ -12,7 +12,7 @@
   每个会话可单独切换模型，Agent 也可固定自己的模型。
 - **工具注册**：装饰器注册 + Pydantic 参数校验，自动生成 LLM function schema；
   工具结果携带 `artifacts`（GeoJSON/表格等），供前端在会话窗口内可视化。
-- **Agent 内置机制**：todo_write 任务清单（含 reminder）、task 子 Agent（全新上下文）、
+- **Agent 内置机制**：task 子 Agent（全新上下文）、
   list_skills / load_skill 技能按需加载（目录注入 system prompt，全文按需读取）、
   上下文压缩（s08 四步管线：大结果转存 / 旧消息归档 / 已读结果占位 / LLM 摘要，
   每次调模型前执行，compact 工具主动压缩，prompt_too_long 补救一次）。
@@ -35,10 +35,14 @@ uv run --env-file .env uvicorn geoagent.server.app:app --reload --port 8000
 | GET | `/api/health` | 健康检查 |
 | GET | `/api/models` | 可用模型列表（含是否已配 key；已内置阿里千问 qwen3.7-flash / qwen3.7-plus） |
 | GET/POST | `/api/conversations` | 会话列表 / 创建会话 |
+| DELETE | `/api/conversations/{id}` | 删除会话（含消息文件） |
 | GET | `/api/conversations/{id}/messages` | 历史消息（含 artifacts） |
 | PUT | `/api/conversations/{id}/model` | 切换该会话的模型 |
 | POST | `/api/conversations/{id}/messages` | 发消息（非流式，返回最终回复） |
 | WS | `/api/conversations/{id}/ws` | 流式对话：token / tool_call / tool_result / artifact / message 事件 |
+
+会话列表按创建时间倒序返回（最新在前）。新建会话默认为"新会话"标题，
+收到首条用户消息后自动截取消息内容作为标题（最长 20 字，超出加省略号）。
 
 ## WebSocket 事件协议
 
@@ -47,12 +51,11 @@ uv run --env-file .env uvicorn geoagent.server.app:app --reload --port 8000
 | 事件类型 | 方向 | 字段 | 说明 |
 | --- | --- | --- | --- |
 | `turn_start` | 服务端→客户端 | `conversation_id` | 一轮对话开始 |
-| `route` | 服务端→客户端 | `target`, `reason` | 路由结果（geo / chat） |
+| `route` | 服务端→客户端 | `target`, `reason` | 路由结果（sql / geo / elder_care / chat） |
 | `token` | 服务端→客户端 | `delta` | 流式增量文本 |
 | `tool_call` | 服务端→客户端 | `id`, `name`, `arguments` | 正在调用工具 |
 | `tool_result` | 服务端→客户端 | `id`, `name`, `is_error`, `content` | 工具执行结果（摘要文本） |
 | `artifact` | 服务端→客户端 | `kind`, `name`, `data` | 可视化产物（geojson / table 等） |
-| `todo` | 服务端→客户端 | `todos` | 任务清单整体更新（todo_write） |
 | `subagent_start` | 服务端→客户端 | `id`, `prompt` | 子 Agent 开始运行（task） |
 | `subagent_end` | 服务端→客户端 | `id`, `is_error`, `content` | 子 Agent 结束并返回最终文本 |
 | `message` | 服务端→客户端 | `role`, `content`, `model` | 最终助手消息 |
@@ -87,10 +90,15 @@ node scripts/smoke.mjs
 ```python
 from geoagent.agents import build_geo_graph
 
-# RouterNode 判断意图 -> "geo" 走 GeoAgent，否则 ChatAgent
+# RouterNode 判断意图 -> "sql" 走 SQLAgent（数据库问答），
+# "elder_care" 走 ElderCareAgent，"geo" 走 GeoAgent，否则 ChatAgent
 router = RouterNode(model="qwen3.7-flash")
+sql = SQLAgent(model="qwen3.7-plus")
+elder = ElderCareAgent(model="qwen3.7-plus")
 geo = GeoAgent(model="qwen3.7-plus")
 chat = ChatAgent()
+router - "sql" >> sql
+router - "elder_care" >> elder
 router - "geo" >> geo
 router - "chat" >> chat
 flow = Flow(router)
@@ -98,19 +106,95 @@ flow = Flow(router)
 
 新增一个 Agent 或自定义节点，然后用 `- action >>` 连进图即可；Agent 内部自带工具循环。
 
+## 养老可达性分析（ElderCareAgent）
+
+场景 Agent 已接入：路由目标 `elder_care`，核心能力为
+**路网步行可达性 + E2SFCA 可达性指数 + 街道/区供需匹配**。
+
+可用工具：
+
+| 工具 | 说明 |
+| --- | --- |
+| `describe_dataset` | 查看数据集要素数 / 字段 / bbox |
+| `build_demand_grid` | 生成 1km 需求网格（七普区级老年人口按面积分摊） |
+| `nearest_facility` | 各需求网格到最近养老机构的步行时间 |
+| `isochrone` | 机构周边步行等时圈 |
+| `e2sca_analysis` | E2SFCA 可达性指数（网格 / 街道 / 区三级输出） |
+| `supply_demand_summary` | 按街道聚合覆盖床位与千人床位数 |
+
+有真实步行路网（`data/road/beijing_walk_{nodes,edges}.csv`）时使用路网 Dijkstra，
+否则回退到直线距离估计并在结果中标注。数据准备见仓库根目录 `data/README.md`。
+
+本地冒烟（不调用 LLM）：`backend/.venv/Scripts/python.exe scripts/smoke_elder_care.py`
+
+## SQL 数据查询（SQLAgent）
+
+路由目标 `sql`：围绕 2026 年第一期地类变化图斑表的"查询 → 分析 → 问答"，
+统计土地资源的前后变化（原土地类型 → 图斑类型）。所有查询经由受控 SQL 工具层
+`geoagent/tools/pg.py` 执行，LLM 不直接持有数据库连接。
+
+可用工具：
+
+| 工具 | 说明 |
+| --- | --- |
+| `list_tables` | 列出白名单内的可用表（含中文表名与描述） |
+| `describe_table` | 查看白名单表的列结构（information_schema） |
+| `run_sql` | 执行只读 SELECT 并返回表格 artifact（自动强制 LIMIT） |
+
+受控护栏（任一不满足即拒绝并返回结构化错误）：
+
+- 仅允许单条 SELECT（禁止 WITH / EXPLAIN / 分号 / 任何 DML / DDL）
+- 表/视图白名单：仅 `data."2026_1_change_landuse"`（2026 年第一期地类变化图斑表，
+  可用 `GEOAGENT_PG_WHITELIST`
+  覆盖）；地类字典与业务口径固化在 SQLAgent 提示词知识卡中，不再暴露为可查询表
+- 强制外层 LIMIT（默认 200 行，`GEOAGENT_PG_MAX_ROWS` 可调）
+- 查询超时（默认 10 秒，`GEOAGENT_PG_TIMEOUT_S` 可调）
+- 查询审计日志（`data/pg_audit.jsonl`，含 SQL、耗时、行数、错误）
+
+注意：该库的表名与列名多为带引号的大写标识符（如 `"TBLX"`、`"XZQDM"`），
+SQL 中需按 `describe_table` 返回的原文加双引号，否则 PostgreSQL 会折叠为小写
+导致"列不存在"。
+
+业务口径（已写入 SQLAgent 提示词知识卡）：
+
+- 原土地类型 = `"DLBM"`/`"DLMC"`（三调地类体系，含农用地/建设用地/未利用地大类）
+- 图斑类型（变化后） = `"TBLX"`（影像地类体系，33 类；数据中 1-4 前导零为 01-04）
+- 面积 `"MJ"` 单位平方米（当前按平方米测试，确认其他单位后再调整）
+- 无修饰的"地类/耕地/建设用地"默认按原土地类型统计；"图斑类型/变化后"按 `TBLX`
+
+展示映射：`run_sql` 返回表格的表头与 `TBLX` 值自动映射为中文
+（见 `geoagent/tools/labels.py`）；字段语义或字典更新时需同步该文件。
+
+连接串从环境变量读取（禁止硬编码账号密码）：
+
+```env
+GEOAGENT_PG_DSN=postgresql://user:pass@192.168.3.209:5432/zhejiang_agent_project
+GEOAGENT_PG_WHITELIST=data."2026_1_change_landuse"
+```
+
+准确率评估（手动运行，真实库 + 真实 LLM）：
+
+```bash
+backend/.venv/Scripts/python.exe scripts/eval_sql_agent.py --refs-only   # 只验证参考 SQL
+backend/.venv/Scripts/python.exe scripts/eval_sql_agent.py               # 跑 LLM 问答并比对
+```
+
 ## 目录
 
 ```text
 geoagent/
 ├── core/          # node(图) / llm(模型切换) / agent(智能体循环) / context / events
-├── tools/         # 装饰器注册 + Pydantic 校验 + 执行器 + geo 演示工具
+├── tools/         # 装饰器注册 + Pydantic 校验 + 执行器 + geo 演示工具 + pg 受控 SQL 层
 ├── memory/        # 短期会话窗口（滚动摘要/截断） + 会话存储 + 长期记忆接口占位
-├── agents/        # 路由器 / 通用对话 / 地理分析 Agent 与图编排
+├── agents/        # 路由器 / SQL 问答 / 通用对话 / 地理分析 / 养老评估 Agent 与图编排
 └── server/        # FastAPI 应用与路由
 ```
 
 ## 下一步规划
 
 - PyQGIS 分析以 worker 进程方式接入（替换演示工具）
+- 快报生成（skill 接入）：在 SQL 查询结果基础上按模板生成土地流向变化快报
+- 养老机构点位数据补充（民政名录 + 坐标化）、分区 60+ 比例补齐
+- 可达性结果前端可视化完善（等时圈/供需图层交互）
 - 长期/短期记忆、上下文压缩、工具失败兜底、任务规划
 - 前端完善：更多 artifact 类型（图片/图表）、地图交互、多轮上下文展示

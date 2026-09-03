@@ -22,8 +22,8 @@ class ConversationContext:
     store: Any  # 类型：memory.store.ConversationStore
     memory: Optional[Any] = None  # 类型：memory.memory.MemoryProvider（长期记忆，后续实现）
     event_sink: Optional[EventSink] = None
-    todos: list[dict[str, str]] = field(default_factory=list)
     skills: Any = None  # 类型：skills.SkillLoader（技能加载器）
+    pg: Any = None  # 类型：tools.pg.PgGateway（受控数据库网关，未配置时为 None）
     subagent_depth: int = 0
     subagents: list[dict[str, Any]] = field(default_factory=list)
     compact_requested: bool = False

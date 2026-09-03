@@ -1,14 +1,34 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
 
 
+def _json_default(obj: Any) -> Any:
+    """JSONL 持久化的兜底序列化：Decimal/时间转基础类型，避免工具结果落库崩溃。"""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def summarize_title(content: str, limit: int = 20) -> str:
+    """根据首条用户消息生成会话标题（去空白、超长截断加省略号）。"""
+    text = " ".join(str(content).split())
+    if not text:
+        return "未命名会话"
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "…"
 
 
 class ConversationStore:
@@ -66,7 +86,15 @@ class ConversationStore:
         return dict(conv) if conv else None
 
     def list(self) -> list[dict[str, Any]]:
-        return [dict(c) for c in sorted(self._meta.values(), key=lambda x: x["created_at"])]
+        # 按创建时间倒序：最新会话排在最前。
+        return [
+            dict(c)
+            for c in sorted(
+                self._meta.values(),
+                key=lambda x: x["created_at"],
+                reverse=True,
+            )
+        ]
 
     def set_model(self, conversation_id: str, model: str) -> Optional[dict[str, Any]]:
         conv = self._meta.get(conversation_id)
@@ -77,6 +105,39 @@ class ConversationStore:
         self._save_meta()
         return dict(conv)
 
+    @staticmethod
+    def _is_placeholder_title(title: str) -> bool:
+        """判断标题是否还是默认占位（新建会话尚未起标题）。"""
+        text = (title or "").strip()
+        if not text:
+            return True
+        if text in ("新会话", "新对话"):
+            return True
+        if text.startswith(("新会话 ", "新对话 ", "会话 ")):
+            return True
+        return False
+
+    def update_title_if_placeholder(
+        self, conversation_id: str, content: str
+    ) -> Optional[dict[str, Any]]:
+        """若会话标题仍是占位，则用首条用户消息生成标题。"""
+        conv = self._meta.get(conversation_id)
+        if conv is None:
+            return None
+        if self._is_placeholder_title(conv.get("title", "")):
+            conv["title"] = summarize_title(content)
+            conv["updated_at"] = _utc_now_iso()
+            self._save_meta()
+        return dict(conv)
+
+    def delete(self, conversation_id: str) -> None:
+        """删除会话（元数据与消息文件）。"""
+        self._meta.pop(conversation_id, None)
+        self._save_meta()
+        path = self._conv_path(conversation_id)
+        if path.exists():
+            path.unlink()
+
     def add_message(self, conversation_id: str, message: dict[str, Any]) -> None:
         conv = self._meta.get(conversation_id)
         if conv is None:
@@ -85,7 +146,7 @@ class ConversationStore:
         entry.setdefault("ts", _utc_now_iso())
         path = self._conv_path(conversation_id)
         with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            f.write(json.dumps(entry, ensure_ascii=False, default=_json_default) + "\n")
         conv["updated_at"] = _utc_now_iso()
         self._save_meta()
 

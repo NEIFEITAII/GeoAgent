@@ -11,36 +11,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ..analysis.datasets import DEMO_DATASETS, default_registry
 from .registry import get_tools, register_tool
 from .result import Artifact, ToolResult
-
-
-DEMO_DATASETS: dict[str, dict[str, Any]] = {
-    "beijing_pois": {
-        "name": "北京兴趣点示例",
-        "description": "北京市区 6 个示例兴趣点（学校、医院、公园、商场等）",
-        "features": [
-            {"name": "北京大学", "category": "教育", "lon": 116.312, "lat": 39.992},
-            {"name": "协和医院", "category": "医疗", "lon": 116.417, "lat": 39.914},
-            {"name": "朝阳公园", "category": "公园", "lon": 116.479, "lat": 39.933},
-            {"name": "国贸商城", "category": "商业", "lon": 116.459, "lat": 39.909},
-            {"name": "故宫博物院", "category": "文化", "lon": 116.397, "lat": 39.917},
-            {"name": "北京南站", "category": "交通", "lon": 116.378, "lat": 39.865},
-        ],
-    },
-    "beijing_subway": {
-        "name": "北京地铁站点示例",
-        "description": "北京 6 个示例地铁站点",
-        "features": [
-            {"name": "天安门东", "line": "1号线", "lon": 116.407, "lat": 39.908},
-            {"name": "西单", "line": "1号线", "lon": 116.374, "lat": 39.907},
-            {"name": "国贸", "line": "1号线", "lon": 116.459, "lat": 39.909},
-            {"name": "中关村", "line": "4号线", "lon": 116.317, "lat": 39.982},
-            {"name": "北京南站", "line": "4号线", "lon": 116.378, "lat": 39.865},
-            {"name": "朝阳门", "line": "2号线", "lon": 116.434, "lat": 39.923},
-        ],
-    },
-}
 
 
 class ListDatasetsParams(BaseModel):
@@ -109,16 +82,10 @@ def _circle_geojson(lon: float, lat: float, radius_km: float) -> dict[str, Any]:
 
 @register_tool("list_datasets", "List available demo geospatial datasets", ListDatasetsParams)
 def list_datasets() -> ToolResult:
-    rows = [
-        {
-            "id": ds_id,
-            "name": ds["name"],
-            "description": ds["description"],
-            "features": len(ds["features"]),
-        }
-        for ds_id, ds in DEMO_DATASETS.items()
-    ]
-    content = "可用数据集:\n" + "\n".join(f"- {r['id']}: {r['name']} ({r['features']} 个要素)" for r in rows)
+    rows = default_registry().list()
+    content = "可用数据集:\n" + "\n".join(
+        f"- {r['id']}: {r['name']} ({r['features']} 个要素)" for r in rows
+    )
     return ToolResult(
         tool_call_id="",
         name="list_datasets",
@@ -137,17 +104,25 @@ def list_datasets() -> ToolResult:
 def load_dataset(dataset_id: str) -> ToolResult:
     ds = DEMO_DATASETS.get(dataset_id)
     if ds is None:
-        return ToolResult(
-            tool_call_id="",
-            name="load_dataset",
-            content=f"数据集不存在: {dataset_id}",
-            is_error=True,
-        )
-    geojson = _feature_collection(ds["features"])
+        # 尝试加载 data/ 下的预备数据集。
+        geojson = default_registry().get(dataset_id)
+        if geojson is None:
+            return ToolResult(
+                tool_call_id="",
+                name="load_dataset",
+                content=f"数据集不存在: {dataset_id}",
+                is_error=True,
+            )
+        name = dataset_id
+        count = len(geojson["features"])
+    else:
+        geojson = _feature_collection(ds["features"])
+        name = ds["name"]
+        count = len(ds["features"])
     return ToolResult(
         tool_call_id="",
         name="load_dataset",
-        content=f"已加载数据集 {ds['name']}，共 {len(ds['features'])} 个要素。",
+        content=f"已加载数据集 {name}，共 {count} 个要素。",
         artifacts=[Artifact(kind="geojson", name=dataset_id, data=geojson)],
     )
 

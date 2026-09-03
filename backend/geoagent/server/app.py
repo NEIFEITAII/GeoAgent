@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI
@@ -9,17 +10,33 @@ from ..config import Settings
 from ..core.llm import LLMService
 from ..memory.store import ConversationStore
 from ..skills import SkillLoader
+from ..tools.pg import JsonlAuditSink, PgGateway
 from .routes import router
 
 
 def create_app(settings: Optional[Settings] = None) -> FastAPI:
     settings = settings or Settings()
-    app = FastAPI(title="GeoAgent", version="0.1.0")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        pg: Optional[PgGateway] = getattr(app.state, "pg", None)
+        if pg is not None:
+            await pg.close()
+
+    app = FastAPI(title="GeoAgent", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.llm = LLMService(settings)
     app.state.store = ConversationStore(settings.data_dir)
     app.state.skills = SkillLoader(settings.skills_dir)
     app.state.skills.scan()
+    app.state.pg = PgGateway(
+        dsn=settings.pg_dsn,
+        whitelist=settings.pg_whitelist,
+        max_rows=settings.pg_max_rows,
+        timeout_s=settings.pg_timeout_s,
+        audit_sink=JsonlAuditSink(settings.pg_audit_path),
+    )
 
     # 开发用 CORS：Vue 开发服务器运行在不同端口。
     app.add_middleware(

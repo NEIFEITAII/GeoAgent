@@ -6,6 +6,12 @@ from pathlib import Path
 from typing import Any
 
 
+# 土地变化检测库默认白名单：统计智能体只查询这一张图斑表。
+# 地类字典与业务口径（原/现土地类型、三调大类、编码映射）固化在 SQLAgent 提示词中，
+# 不再作为可查询表暴露给 LLM（可通过 GEOAGENT_PG_WHITELIST 覆盖）。
+DEFAULT_PG_WHITELIST: list[str] = ['data."2026_1_change_landuse"']
+
+
 @dataclass(frozen=True)
 class ModelProfile:
     """模型注册表中的一条模型（或兼容端点）配置。"""
@@ -68,6 +74,17 @@ class Settings:
         default_skills_dir = Path(__file__).resolve().parent.parent.parent / "skills"
         self.skills_dir = Path(os.getenv("GEOAGENT_SKILLS_DIR", str(default_skills_dir)))
         self.model_registry = default_model_registry()
+        # PostgreSQL/PostGIS 土地变化检测库（受控只读访问，连接串来自环境变量）。
+        self.pg_dsn = os.getenv("GEOAGENT_PG_DSN", "").strip()
+        raw_whitelist = os.getenv("GEOAGENT_PG_WHITELIST", "").strip()
+        self.pg_whitelist = (
+            [item.strip() for item in raw_whitelist.split(",") if item.strip()]
+            if raw_whitelist
+            else list(DEFAULT_PG_WHITELIST)
+        )
+        self.pg_max_rows = int(os.getenv("GEOAGENT_PG_MAX_ROWS", "200"))
+        self.pg_timeout_s = float(os.getenv("GEOAGENT_PG_TIMEOUT_S", "10"))
+        self.pg_audit_path = self.data_dir / "pg_audit.jsonl"
 
     def profile(self, model_id: str) -> ModelProfile:
         try:

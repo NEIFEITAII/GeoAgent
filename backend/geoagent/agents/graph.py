@@ -5,24 +5,32 @@ from typing import Any, Optional
 from ..core.context import ConversationContext
 from ..core.node import Flow
 from .chat import ChatAgent
+from .elder_care import ElderCareAgent
 from .geo import GeoAgent
 from .router import RouterNode
+from .sql import SQLAgent
 
 
 def build_geo_graph(
     router_model: Optional[str] = None,
     geo_model: Optional[str] = None,
     chat_model: Optional[str] = None,
+    elder_care_model: Optional[str] = None,
+    sql_model: Optional[str] = None,
 ) -> Flow:
-    """构建默认图：Router -> {GeoAgent, ChatAgent}。
+    """构建默认图：Router -> {SQLAgent, ElderCareAgent, GeoAgent, ChatAgent}。
 
     Agent 本身就是 Node，因此后续可通过相同的 `- "action" >>` 语法扩展
     规划器/总结器/质检等智能体或自定义节点。
     """
     router = RouterNode(model=router_model)
+    sql = SQLAgent(model=sql_model)
+    elder = ElderCareAgent(model=elder_care_model)
     geo = GeoAgent(model=geo_model)
     chat = ChatAgent(model=chat_model)
 
+    router - "sql" >> sql
+    router - "elder_care" >> elder
     router - "geo" >> geo
     router - "chat" >> chat
     return Flow(router)

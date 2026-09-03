@@ -1,5 +1,5 @@
 <template>
-  <main class="chat">
+  <main class="chat" :class="{ streaming: chat.streaming }">
     <header class="chat-header">
       <div class="chat-title">{{ currentTitle }}</div>
       <select

@@ -53,18 +53,30 @@ GeoAgent 是一个**通过自然语言对话完成地理空间分析与业务问
   API 报 prompt_too_long 时补救一次，`compact` 工具可主动压缩；
   孤儿 tool 消息清理；JSONL 会话存储；长期记忆接口占位（`MemoryProvider`）。
 - **Agent 内置机制**（`core/agent.py` + `tools/builtin.py`）：所有 Agent 默认携带
-  `todo_write` 任务清单工具（整体替换、上限 20 项、单 in_progress、内容非空）；
-  多步任务时模型先规划再执行，连续多轮未更新清单会注入 reminder；
-  清单通过 `todo` 事件实时推送前端，并随最终助手消息持久化。
+  `task` 子 Agent 委派、`list_skills` / `load_skill` 技能按需加载、`compact`
+  主动压缩工具；
 - **子 Agent 与技能加载**（`core/subagent.py` + `skills.py`）：`task` 工具以全新
   会话上下文运行嵌套 Agent（不持久化、不污染父上下文，子 Agent 不含 task，
   有深度限制），返回最终文本；`list_skills` / `load_skill` 实现技能按需加载——
   启动时扫描 `skills/*/SKILL.md` 建立目录并注入 system prompt，完整说明按需读取。
-- **智能体与图**（`agents/`）：RouterNode（LLM 路由 + 关键字兜底，当前目标 chat / geo）、
-  ChatAgent、GeoAgent，`build_geo_graph()` 组装默认图。
+- **智能体与图**（`agents/`）：RouterNode（LLM 路由 + 关键字兜底，当前目标
+  sql / chat / geo / elder_care）、SQLAgent、ChatAgent、GeoAgent、ElderCareAgent，
+  `build_geo_graph()` 组装默认图。
+- **受控 SQL 数据访问层**（`tools/pg.py`）：接入土地变化检测 PostgreSQL/PostGIS 库，
+  提供 `list_tables` / `describe_table` / `run_sql` 三个只读工具；强制
+  单语句、仅 SELECT、表/视图白名单、外层 LIMIT、查询超时与 JSONL 查询审计日志；
+  连接池懒加载并挂在 `app.state.pg`，通过会话上下文注入工具。
+- **土地变化统计 SQL 问答 Agent**（`agents/sql.py`）：复用 Agent 工具循环完成
+  "查询 → 分析 → 问答"，路由目标 `sql`；只查询图斑表一张表，地类字典、前后变化
+  口径（原土地类型 DLBM/DLMC ↔ 图斑类型 TBLX）与三调大类规则固化在提示词
+  知识卡中；`scripts/eval_sql_agent.py` 提供 7 个 golden 用例做准确率回归。
+- **养老可达性分析**（`analysis/` + `agents/elder_care.py` + `tools/accessibility.py`）：
+  共享分析核心（数据集注册、1km 网格需求、步行路网、E2SFCA 与供需匹配），
+  场景 Agent 已接入路由目标 `elder_care`；路网由脚本从 OSM PBF 构建，
+  无路网时自动回退到直线距离估计并在结果中标注。
 - **服务层**（`server/`）：REST（会话 CRUD、模型切换、发消息）+ WebSocket 流式事件
   （token / route / tool_call / tool_result / artifact / message / error / turn_end）。
-- **验证**：13 个 pytest 用例全部通过；已用阿里千问 qwen3.7-flash 真实跑通
+- **验证**：77 个 pytest 用例全部通过；已用阿里千问 qwen3.7-flash 真实跑通
   "加载数据集 → 点缓冲区 → GeoJSON artifact 输出"的完整链路。
 - **前端骨架**（`frontend/`）：左侧历史会话列表 + 右侧会话窗口；流式展示
   token / 路由 / 工具调用卡片（运行中/完成/失败）；GeoJSON 用 OpenLayers
@@ -73,15 +85,11 @@ GeoAgent 是一个**通过自然语言对话完成地理空间分析与业务问
 
 ### 近期主线（按顺序推进）
 
-1. **SQL 数据访问层**（规划 `tools/pg.py`）：接入土地变化检测 PostgreSQL/PostGIS 库，
-   提供 `list_tables` / `describe_table` / `run_sql`（受控只读）等工具；
-2. **通用 SQL 问答 Agent**（规划 `agents/sql.py`）：复用 Agent 工具循环完成
-   "查询 → 分析 → 问答"，路由新增 `sql` 目标；
-3. **快报生成（skill 接入）**：以 skill 形式提供土地流向变化快报模板与生成流程，
+1. **快报生成（skill 接入）**：以 skill 形式提供土地流向变化快报模板与生成流程，
    在查询分析结果基础上按模板产出快报；
-4. **场景评估 Agent**（规划 `agents/elder_care.py`、`agents/carrying.py`）：
-   养老机构可达性分析评估、资源环境承载力评估，路由新增对应目标；
-5. 任务规划机制（复杂请求拆分为子任务/子图），按场景需要引入。
+2. **场景评估 Agent**（`agents/elder_care.py` 已实现；`agents/carrying.py` 规划中）：
+   养老机构可达性分析评估已接入路由 `elder_care`；资源环境承载力评估待实现；
+3. 任务规划机制（复杂请求拆分为子任务/子图），按场景需要引入。
 
 ### 尚未完成 / 规划中
 
@@ -115,17 +123,19 @@ GeoAgent/
 │       │   ├── executor.py      # 异步执行器（校验、错误归一化）
 │       │   ├── result.py        # ToolResult / Artifact
 │       │   ├── geo.py           # 地理演示工具
-│       │   └── pg.py            # PostGIS 受控 SQL 查询工具层（规划）
+│       │   ├── accessibility.py # 养老可达性分析工具（E2SFCA / 供需匹配）
+│       │   └── pg.py            # PostGIS 受控 SQL 查询工具层
 │       ├── memory/              # 记忆与会话
 │       │   ├── session.py       # 短期消息窗口（裁剪/摘要/清理）
 │       │   ├── store.py         # JSONL 会话存储
 │       │   └── memory.py        # 长期记忆接口（占位）
+│       ├── analysis/            # 共享空间分析核心（数据集/网格/路网/E2SFCA）
 │       ├── agents/              # 业务智能体与图编排
 │       │   ├── router.py        # 意图路由
 │       │   ├── chat.py          # 通用对话
 │       │   ├── geo.py           # 地理分析（工具循环）
-│       │   ├── sql.py           # 通用 SQL 问答 Agent（规划）
-│       │   ├── elder_care.py    # 养老机构可达性评估 Agent（规划）
+│       │   ├── sql.py           # 通用 SQL 问答 Agent
+│       │   ├── elder_care.py    # 养老机构可达性评估 Agent
 │       │   ├── carrying.py      # 资源环境承载力评估 Agent（规划）
 │       │   └── graph.py         # build_geo_graph() 默认图
 │       └── server/              # FastAPI 入口
@@ -188,7 +198,7 @@ GeoAgent/
      完整数据放 artifacts，content 只放摘要（超长会被截断）；
   3. 在 `tools/geo.py` 的 `get_geo_tools()` 或对应 Agent 的工具列表中加入；
   4. SQL 查询类工具必须走受控执行层（见 4.2），不得裸执行 LLM 生成的任意 SQL。
-  所有 Agent 共享的内置工具（todo_write / task / list_skills / load_skill）统一放在
+  所有 Agent 共享的内置工具（task / list_skills / load_skill / compact）统一放在
   `tools/builtin.py`，在 `core/agent.py` 中自动合并，业务工具不要与内置工具重名。
   新增内置工具时同步更新本文档与 `backend/README.md` 的协议表。
 - **新增技能**：在仓库根目录 `skills/` 下建 `{skill_name}/SKILL.md`（默认技能目录，
@@ -240,12 +250,11 @@ GeoAgent/
 | 事件类型 | 方向 | 字段 | 说明 |
 | --- | --- | --- | --- |
 | `turn_start` | 后端→前端 | `conversation_id` | 一轮对话开始 |
-| `route` | 后端→前端 | `target`, `reason` | 路由结果（chat / geo，规划扩展 sql / elder_care / carrying） |
+| `route` | 后端→前端 | `target`, `reason` | 路由结果（sql / chat / geo / elder_care，规划扩展 carrying） |
 | `token` | 后端→前端 | `delta` | 流式增量文本 |
 | `tool_call` | 后端→前端 | `id`, `name`, `arguments` | 正在调用工具 |
 | `tool_result` | 后端→前端 | `id`, `name`, `is_error`, `content` | 工具结果摘要 |
 | `artifact` | 后端→前端 | `kind`, `name`, `data` | 可视化产物 |
-| `todo` | 后端→前端 | `todos` | 任务清单整体更新（todo_write） |
 | `subagent_start` | 后端→前端 | `id`, `prompt` | 子 Agent 开始运行（task） |
 | `subagent_end` | 后端→前端 | `id`, `is_error`, `content` | 子 Agent 结束并返回最终文本 |
 | `message` | 后端→前端 | `role`, `content`, `model` | 最终助手消息 |

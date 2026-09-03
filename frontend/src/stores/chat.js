@@ -43,8 +43,7 @@ function buildRenderMessages(rawMessages) {
         role: 'assistant',
         content: m.content || '',
         streaming: false,
-        route: '',
-        todos: Array.isArray(m.todos) ? m.todos : [],
+        route: m.route || '',
         subagents: Array.isArray(m.subagents) ? m.subagents : [],
         toolCalls: (m.tool_calls || []).map((tc) => ({
           id: tc.id,
@@ -84,6 +83,11 @@ async function refreshMessages() {
   chat.messages = buildRenderMessages(data.messages || [])
 }
 
+async function refreshConversations() {
+  const data = await api.listConversations()
+  chat.conversations = data.conversations || []
+}
+
 function disconnect() {
   if (chat._ws) {
     chat._ws.onclose = null
@@ -117,7 +121,6 @@ function handleEvent(event) {
         content: '',
         streaming: true,
         route: '',
-        todos: [],
         subagents: [],
         toolCalls: [],
         artifacts: [],
@@ -126,9 +129,6 @@ function handleEvent(event) {
       break
     case 'route':
       if (chat._streamAssistant) chat._streamAssistant.route = event.target || ''
-      break
-    case 'todo':
-      if (chat._streamAssistant) chat._streamAssistant.todos = event.todos || []
       break
     case 'subagent_start':
       if (chat._streamAssistant) {
@@ -194,6 +194,10 @@ function handleEvent(event) {
       refreshMessages().catch((err) => {
         chat.error = err.message
       })
+      // 首条消息后标题可能已由服务端自动生成，刷新会话列表。
+      refreshConversations().catch((err) => {
+        chat.error = err.message
+      })
       break
   }
 }
@@ -229,6 +233,24 @@ async function createConversation() {
   await selectConversation(conv.id)
 }
 
+async function deleteConversation(id) {
+  await api.deleteConversation(id)
+  const idx = chat.conversations.findIndex((c) => c.id === id)
+  if (idx >= 0) chat.conversations.splice(idx, 1)
+  if (chat.currentId !== id) return
+  disconnect()
+  chat.currentId = null
+  chat.messages = []
+  chat.streaming = false
+  if (chat.conversations.length) {
+    await selectConversation(chat.conversations[0].id)
+  } else {
+    const conv = await api.createConversation({ title: '新会话' })
+    chat.conversations.unshift(conv)
+    await selectConversation(conv.id)
+  }
+}
+
 async function switchModel(model) {
   if (!chat.currentId) return
   await api.switchModel(chat.currentId, model)
@@ -248,5 +270,6 @@ function sendMessage(content) {
 chat.init = init
 chat.selectConversation = selectConversation
 chat.createConversation = createConversation
+chat.deleteConversation = deleteConversation
 chat.switchModel = switchModel
 chat.sendMessage = sendMessage

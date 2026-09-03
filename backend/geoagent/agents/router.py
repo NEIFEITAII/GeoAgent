@@ -15,10 +15,15 @@ ROUTE_TOOL = {
             "properties": {
                 "target": {
                     "type": "string",
-                    "enum": ["geo", "chat"],
+                    "enum": ["sql", "geo", "elder_care", "chat"],
                     "description": (
+                        "sql: database queries / land change statistics / tables / "
+                        "aggregations / land-use type changes; "
                         "geo: spatial analysis / data / map / coordinates / buffer / "
-                        "distance / area / layers; chat: anything else"
+                        "distance / area / layers; "
+                        "elder_care: elderly care facility accessibility / nursing "
+                        "homes / coverage / beds / supply-demand matching; "
+                        "chat: anything else"
                     ),
                 }
             },
@@ -28,9 +33,16 @@ ROUTE_TOOL = {
 }
 
 ROUTER_SYSTEM_PROMPT = (
-    "你是 GeoAgent 的意图路由器。判断用户请求是否需要地理空间分析工具"
-    "（加载数据集、缓冲区、距离、面积、图层、坐标、地图可视化、空间分析等），"
-    "需要则调用 route 工具并设置 target=geo，否则设置 target=chat。"
+    "You are the intent router of GeoAgent. Decide which agent should handle the "
+    "user request and set the target accordingly:\n"
+    "- sql: questions that should be answered by querying the land-change database, "
+    "such as table queries, statistics, aggregations, land-use type changes "
+    "(耕地/建设用地/地类/图斑 etc.), or SQL questions.\n"
+    "- geo: general spatial analysis, loading datasets, maps, coordinates, buffer, "
+    "distance, area, layers, or map visualization.\n"
+    "- elder_care: elderly care facility accessibility, nursing homes, coverage, "
+    "beds, or supply-demand matching.\n"
+    "- chat: anything else."
 )
 
 # 当路由模型不可用时的兜底方案。
@@ -56,9 +68,51 @@ ROUTE_GEO_KEYWORDS = (
     "分析",
 )
 
+ROUTE_ELDER_CARE_KEYWORDS = (
+    "养老",
+    "老年",
+    "机构",
+    "护理",
+    "可达",
+    "覆盖",
+    "床位",
+    "供需",
+    "nursing",
+    "elder",
+    "care",
+    "accessibility",
+    "facility",
+)
+
+ROUTE_SQL_KEYWORDS = (
+    "查询",
+    "统计",
+    "汇总",
+    "sql",
+    "数据库",
+    "数据表",
+    "表结构",
+    "表字段",
+    "地类",
+    "图斑",
+    "耕地",
+    "建设用地",
+    "变化图斑",
+    "地类变化",
+    "流向",
+    "tblx",
+    "dict",
+    "select",
+    "count",
+    "sum",
+    "group by",
+    "join",
+    "where",
+)
+
 
 class RouterNode(Node):
-    """将用户请求路由到地理分析智能体或通用对话智能体。"""
+    """将用户请求路由到 SQL / 地理 / 养老 / 通用对话智能体。"""
 
     def __init__(self, model: Optional[str] = None) -> None:
         super().__init__(name="router")
@@ -80,14 +134,23 @@ class RouterNode(Node):
             )
             if message.tool_calls:
                 candidate = message.tool_calls[0].arguments.get("target")
-                if candidate in ("geo", "chat"):
-                    target = candidate
+            if candidate in ("sql", "geo", "elder_care", "chat"):
+                target = candidate
             reason = message.content or ""
         except Exception:
             # 兜底：路由模型不可用时改用关键字启发式路由。
             lowered = user_text.lower()
-            target = "geo" if any(k in lowered for k in ROUTE_GEO_KEYWORDS) else "chat"
+            if any(k in lowered for k in ROUTE_ELDER_CARE_KEYWORDS):
+                target = "elder_care"
+            elif any(k in lowered for k in ROUTE_SQL_KEYWORDS):
+                target = "sql"
+            elif any(k in lowered for k in ROUTE_GEO_KEYWORDS):
+                target = "geo"
+            else:
+                target = "chat"
             reason = "heuristic fallback (router model unavailable)"
 
         await ctx.emit(Event("route", {"target": target, "reason": reason}))
+        # 记录本次路由结果，供 Agent 持久化到最终助手消息。
+        ctx.route = target
         return target, payload

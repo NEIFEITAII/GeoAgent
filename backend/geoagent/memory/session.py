@@ -31,6 +31,9 @@ class ConversationSession:
 
     def add_user(self, content: str) -> None:
         self.add_message({"role": "user", "content": content})
+        if self.store is not None and self.conversation_id:
+            # 首条用户消息用于自动生成会话标题（占位标题时）。
+            self.store.update_title_if_placeholder(self.conversation_id, content)
 
     def add_tool(self, tool_message: dict[str, Any]) -> None:
         # 工具结果不在此截断：大结果由 ContextCompactor 按预算转存/占位处理。

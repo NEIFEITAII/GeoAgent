@@ -4,17 +4,8 @@
 
     <template v-else-if="message.role === 'assistant'">
       <div v-if="message.route" class="msg-route">
-        → {{ message.route === 'geo' ? '地理分析智能体' : '通用对话智能体' }}
+        → {{ routeLabel(message.route) }}
       </div>
-      <ul v-if="message.todos && message.todos.length" class="msg-todos">
-        <li
-          v-for="(t, i) in message.todos"
-          :key="i"
-          :class="'todo-' + (t.status || 'pending')"
-        >
-          {{ t.content }}
-        </li>
-      </ul>
       <div
         v-for="s in message.subagents || []"
         :key="s.id"
@@ -55,4 +46,15 @@ import ArtifactView from './ArtifactView.vue'
 defineProps({
   message: { type: Object, required: true },
 })
+
+const ROUTE_LABELS = {
+  sql: '土地变化数据查询智能体',
+  elder_care: '养老可达性分析智能体',
+  geo: '地理分析智能体',
+  chat: '通用对话智能体',
+}
+
+function routeLabel(route) {
+  return ROUTE_LABELS[route] || route || '通用对话智能体'
+}
 </script>

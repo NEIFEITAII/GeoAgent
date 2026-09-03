@@ -9,7 +9,9 @@
       </thead>
       <tbody>
         <tr v-for="(row, i) in artifact.data.rows" :key="i">
-          <td v-for="c in artifact.data.columns" :key="c">{{ row[c] }}</td>
+          <td v-for="(c, j) in artifact.data.columns" :key="c">
+            {{ cellValue(row, c, j) }}
+          </td>
         </tr>
       </tbody>
     </table>
@@ -32,6 +34,12 @@ import View from 'ol/View'
 const props = defineProps({
   artifact: { type: Object, required: true },
 })
+
+// 兼容两种行格式：对象行按列名取值，数组行按下标取值。
+function cellValue(row, column, index) {
+  if (Array.isArray(row)) return row[index]
+  return row[column]
+}
 
 const mapEl = ref(null)
 let map = null

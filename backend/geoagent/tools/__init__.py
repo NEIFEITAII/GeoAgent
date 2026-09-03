@@ -4,7 +4,9 @@ from .result import Artifact, ToolResult
 
 # 导入 geo / builtin 模块，使其中的工具在包导入时完成注册。
 from . import builtin as _builtin  # noqa: E402,F401
+from . import accessibility as _accessibility  # noqa: E402,F401
 from . import geo as _geo  # noqa: E402,F401
+from . import pg as _pg  # noqa: E402,F401
 
 __all__ = [
     "ToolExecutor",

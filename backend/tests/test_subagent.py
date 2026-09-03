@@ -79,5 +79,5 @@ async def test_task_tool_respects_depth_limit():
 def test_subagent_tools_exclude_task():
     names = {t.name for t in build_subagent_tools()}
     assert "task" not in names
-    assert "todo_write" in names
+    assert "todo_write" not in names
     assert "load_skill" in names

@@ -4,7 +4,6 @@ from typing import Any, Optional
 
 from ..memory.compactor import ContextCompactor
 from ..tools.builtin import get_builtin_tools
-from ..tools.executor import ToolExecutor
 from ..tools.registry import Tool
 from .events import Event
 from .llm import AssistantMessage
@@ -13,23 +12,11 @@ from .node import Node
 
 # 所有 Agent 统一追加的规划引导（英文，见 AGENTS.md 语言约定）。
 BUILTIN_TOOL_GUIDANCE = (
-    "\n\nWhen the user's request involves multiple steps, first call todo_write to "
-    "create a task list, then update item statuses (pending / in_progress / "
-    "completed) as you make progress. "
-    "Delegate large, self-contained subtasks to a subagent with the task tool to keep "
+    "\n\nDelegate large, self-contained subtasks to a subagent with the task tool to keep "
     "this conversation focused. "
     "Use list_skills to see available skills, and load_skill to read their full "
     "instructions when the task requires specialized knowledge."
 )
-
-# 连续若干轮工具调用未更新任务清单时，注入的提醒。
-REMINDER_MESSAGE = (
-    "Reminder: you have not updated your task list for a few rounds. "
-    "If the current task is multi-step, call todo_write to reflect your progress."
-)
-
-# 连续多少轮工具调用未使用 todo_write 后触发提醒。
-TODO_REMINDER_ROUNDS = 3
 
 
 class Agent(Node):
@@ -58,6 +45,9 @@ class Agent(Node):
         self.model = model
         self.max_turns = max_turns
         self.temperature = temperature
+        # 局部导入避免 tools -> core -> tools 的循环依赖。
+        from ..tools.executor import ToolExecutor
+
         self.executor = ToolExecutor(self.tools)
 
     async def exec(self, ctx: Any, payload: Any) -> tuple[str, Any]:
@@ -67,8 +57,6 @@ class Agent(Node):
         model = self.model or ctx.model
         tool_schemas = [t.to_llm_format() for t in self.tools] or None
         final: Optional[AssistantMessage] = None
-        rounds_since_todo = 0
-        pending_reminder = False
         reactive_done = False
         compactor = ContextCompactor(
             transcripts_dir=getattr(ctx, "transcripts_dir", None)
@@ -95,9 +83,6 @@ class Agent(Node):
                 system_prompt=system_prompt,
                 memory_context=memory_context,
             )
-            if pending_reminder:
-                messages.append({"role": "system", "content": REMINDER_MESSAGE})
-                pending_reminder = False
 
             try:
                 if ctx.event_sink is not None:
@@ -138,8 +123,7 @@ class Agent(Node):
                 raise
 
             final_dict = final.to_dict()
-            if ctx.todos:
-                final_dict["todos"] = list(ctx.todos)
+            final_dict["route"] = getattr(ctx, "route", "") or ""
             subagents = getattr(ctx, "subagents", None)
             if subagents:
                 final_dict["subagents"] = list(subagents)
@@ -147,7 +131,6 @@ class Agent(Node):
             if not final.tool_calls:
                 break
 
-            used_todo = any(tc.name == "todo_write" for tc in final.tool_calls)
             for tc in final.tool_calls:
                 await ctx.emit(
                     Event(
@@ -179,13 +162,6 @@ class Agent(Node):
                     force=True,
                 )
                 ctx.compact_requested = False
-            if used_todo:
-                rounds_since_todo = 0
-            else:
-                rounds_since_todo += 1
-                if rounds_since_todo >= TODO_REMINDER_ROUNDS:
-                    pending_reminder = True
-                    rounds_since_todo = 0
 
         if final is None:
             raise RuntimeError(f"Agent '{self.name}' produced no response")
@@ -197,7 +173,7 @@ class Agent(Node):
                     "role": "assistant",
                     "content": final.content,
                     "model": model,
-                    "todos": list(ctx.todos),
+                    "route": getattr(ctx, "route", "") or "",
                     "subagents": list(getattr(ctx, "subagents", []) or []),
                 },
             )
