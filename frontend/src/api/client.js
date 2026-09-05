@@ -31,6 +31,8 @@ export const api = {
     request(`/conversations/${id}`, { method: 'DELETE' }),
   switchModel: (id, model) =>
     request(`/conversations/${id}/model`, { method: 'PUT', body: JSON.stringify({ model }) }),
+  rollbackLastUserTurn: (id) =>
+    request(`/conversations/${id}/rollback-last-user-turn`, { method: 'POST' }),
 }
 
 // 打开会话 WebSocket；onEvent 收到服务端下发的流式事件

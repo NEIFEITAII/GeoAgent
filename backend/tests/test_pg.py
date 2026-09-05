@@ -134,8 +134,11 @@ def test_humanize_table_translates_headers_and_tblx_values():
     assert out_rows[0]["extra_col"] == "keep-me"
 
 
-def test_config_default_whitelist_is_single_table():
-    assert DEFAULT_PG_WHITELIST == ['data."2026_1_change_landuse"']
+def test_config_default_whitelist_includes_main_and_dict_tables():
+    assert DEFAULT_PG_WHITELIST[0] == 'data."2026_1_change_landuse"'
+    assert "knowledge_base.dict_tblx" in DEFAULT_PG_WHITELIST
+    assert "knowledge_base.dict_land_classification_summary" in DEFAULT_PG_WHITELIST
+    assert len(DEFAULT_PG_WHITELIST) == 3
 
 
 def test_normalize_qualified_handles_quoted_identifiers():

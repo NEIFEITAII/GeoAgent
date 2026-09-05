@@ -174,15 +174,21 @@ class LLMService:
                     content_parts.append(delta.content)
                     if on_token is not None:
                         await on_token(delta.content)
-                for i, tc in enumerate(delta.tool_calls or []):
+                for tc in delta.tool_calls or []:
+                    # 用流内 index（缺失时退回 id）作为槽位，避免多个工具调用挤进同一槽。
+                    index = getattr(tc, "index", None)
+                    key = index if index is not None else (getattr(tc, "id", None) or 0)
                     slot = tool_slots.setdefault(
-                        i, {"id": "", "function": {"name": "", "arguments": ""}}
+                        key, {"id": "", "function": {"name": "", "arguments": ""}}
                     )
-                    if tc.id:
+                    if tc.id and not slot["id"]:
                         slot["id"] = tc.id
                     if tc.function:
-                        if tc.function.name:
-                            slot["function"]["name"] += tc.function.name
+                        name = tc.function.name or ""
+                        # 部分兼容端点每个分片都会重复完整 name；只取首次、忽略重复，
+                        # 避免把 "run_sql" 拼成 "run_sqlrun_sql"。
+                        if name and not slot["function"]["name"]:
+                            slot["function"]["name"] = name
                         if tc.function.arguments:
                             slot["function"]["arguments"] += tc.function.arguments
         except Exception:

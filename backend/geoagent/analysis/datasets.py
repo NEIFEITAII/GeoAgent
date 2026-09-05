@@ -1,7 +1,7 @@
 """数据集注册表：统一管理内置演示数据集与 data/ 下预备的真实数据集。
 
 设计说明：
-- 演示数据集保持与旧 geo.py 相同的 id（beijing_pois / beijing_subway），避免破坏既有行为；
+- 演示数据集 id 稳定（beijing_pois / beijing_subway），避免破坏既有行为；
 - 预备数据集从仓库根目录 data/ 按相对路径扫描，文件缺失时自动跳过；
 - LLM 只通过 dataset_id 引用数据，不接触文件路径。
 """
@@ -15,7 +15,7 @@ from typing import Any, Optional
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DATA_DIR = ROOT / "data"
 
-# 内置演示数据集（从 tools/geo.py 迁移至此，保持 id 不变）。
+# 内置演示数据集（id 保持稳定）。
 DEMO_DATASETS: dict[str, dict[str, Any]] = {
     "beijing_pois": {
         "name": "北京兴趣点示例",

@@ -80,14 +80,13 @@ class SkillLoader:
         }
 
     def catalog_prompt(self) -> str:
-        """生成注入 system prompt 的技能目录文本（英文）。"""
+        """生成注入 system prompt 的技能目录文本。"""
         if not self.skills:
             return ""
-        lines = ["Skills available:"]
+        lines = ["可用技能："]
         lines += [f"- {name}: {info['description']}" for name, info in self.catalog().items()]
         lines.append(
-            "Use list_skills to see this catalog, and load_skill to read the full "
-            "instructions when a skill applies."
+            "可调用 list_skills 查看目录；当任务匹配某技能时，用 load_skill 读取完整说明。"
         )
         return "\n".join(lines)
 

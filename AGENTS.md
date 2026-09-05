@@ -1,7 +1,8 @@
 # AGENTS.md — GeoAgent 项目说明与开发规范
 
 > 本文件面向后续参与开发的 AI 智能体与人类开发者。所有代码注释、本文档均使用**中文**；
-> 所有喂给 LLM 的提示词（system prompt、工具描述、路由指令等）统一使用**英文**。
+> 所有喂给 LLM 的提示词（system prompt、工具描述、路由指令等）当前统一使用**中文**
+> （2026-09 起按业务要求；工具"调用名"仍为英文标识，前端按中文名展示）。
 
 ## 1. 项目要做什么
 
@@ -10,6 +11,8 @@ GeoAgent 是一个**通过自然语言对话完成地理空间分析与业务问
 - 用户在聊天窗口输入自然语言，Agent 自主规划并调用数据库查询 / 空间分析工具，
   把分析结果以可视化形式渲染在会话窗口内（GeoJSON 图层、表格等），
   而不是打开一个整页底图应用。
+- 当前主线：围绕 2026 年第一期地类变化图斑表做**前后变化统计问答**（如"耕地转为
+  建设用地的面积是多少"）与 **Word 快报生成**。
 - 支持多用户、多会话（登录/权限暂未实现，当前为 dev 模式，所有会话全局可见）。
 
 ### 核心能力链路（按依赖关系）
@@ -27,12 +30,12 @@ GeoAgent 是一个**通过自然语言对话完成地理空间分析与业务问
 | 层 | 选型 | 状态 |
 | --- | --- | --- |
 | 后端 | Python + FastAPI + WebSocket + openai SDK，uv 管理环境 | 骨架已搭建 |
-| 数据与分析引擎 | PostgreSQL/PostGIS（土地变化检测库，当前主线）；PyQGIS（计划，worker 进程隔离） | PostGIS 查询层待接入 |
-| LLM | OpenAI 兼容接口，内置 qwen3.7-flash / qwen3.7-plus | 已支持多模型切换 |
+| 数据与分析引擎 | PostgreSQL/PostGIS（土地变化检测库，当前主线）；PyQGIS（计划，worker 进程隔离） | PostGIS 受控查询层已接入（tools/pg.py） |
+| LLM | OpenAI 兼容接口，内置 qwen3.7-flash / qwen3.7-plus / qwen3.7-max-2026-06-08 | 已支持多模型切换 |
 | 前端 | Vue3 + Vite + OpenLayers | 骨架已搭建（会话列表 + 会话窗口 + 流式工具卡片 + 内嵌地图） |
 | 存储 | 会话：JSONL（当前）→ SQLite/PostGIS（规划）；业务数据：PostgreSQL | JSONL 已可用 |
 
-## 2. 目前做到什么程度（2026-08-20）
+## 2. 目前做到什么程度（2026-09-04）
 
 ### 已完成
 
@@ -41,13 +44,11 @@ GeoAgent 是一个**通过自然语言对话完成地理空间分析与业务问
 - **Agent 抽象**（`core/agent.py`）：Agent 就是一个 Node，组合了系统提示词 + 工具集 +
   模型配置 + "LLM → 工具 → 再问"循环，可与其他自定义节点混编成图。
 - **多模型切换**（`core/llm.py` + `config.py`）：`ModelProfile` 注册表内置
-  qwen3.7-flash / qwen3.7-plus；支持 `OPENAI_BASE_URL` 全局覆盖；
+  qwen3.7-flash / qwen3.7-plus / qwen3.7-max-2026-06-08；支持 `OPENAI_BASE_URL` 全局覆盖；
   每个会话可通过 REST 接口随时切换模型。
 - **工具系统**（`tools/`）：装饰器注册 + Pydantic 参数校验自动生成 LLM schema；
   异步执行器返回结构化错误；`ToolResult` 同时携带给 LLM 的文本 `content` 和
   给前端渲染的 `artifacts`（geojson / table）。
-- **演示地理工具**（`tools/geo.py`）：list_datasets、load_dataset、buffer_point、
-  polygon_area、distance_between_points（纯 Python，无 PyQGIS 依赖）。
 - **上下文压缩与持久化**（`memory/`）：参考 learn-claude-code s08 的四步压缩管线
   （大工具结果转存 → 旧消息归档 → 已读结果占位 → LLM 事实摘要），每次调用模型前执行，
   API 报 prompt_too_long 时补救一次，`compact` 工具可主动压缩；
@@ -60,33 +61,48 @@ GeoAgent 是一个**通过自然语言对话完成地理空间分析与业务问
   有深度限制），返回最终文本；`list_skills` / `load_skill` 实现技能按需加载——
   启动时扫描 `skills/*/SKILL.md` 建立目录并注入 system prompt，完整说明按需读取。
 - **智能体与图**（`agents/`）：RouterNode（LLM 路由 + 关键字兜底，当前目标
-  sql / chat / geo / elder_care）、SQLAgent、ChatAgent、GeoAgent、ElderCareAgent，
+  sql / elder_care / chat）、SQLAgent、ChatAgent、ElderCareAgent，
   `build_geo_graph()` 组装默认图。
 - **受控 SQL 数据访问层**（`tools/pg.py`）：接入土地变化检测 PostgreSQL/PostGIS 库，
   提供 `list_tables` / `describe_table` / `run_sql` 三个只读工具；强制
   单语句、仅 SELECT、表/视图白名单、外层 LIMIT、查询超时与 JSONL 查询审计日志；
   连接池懒加载并挂在 `app.state.pg`，通过会话上下文注入工具。
 - **土地变化统计 SQL 问答 Agent**（`agents/sql.py`）：复用 Agent 工具循环完成
-  "查询 → 分析 → 问答"，路由目标 `sql`；只查询图斑表一张表，地类字典、前后变化
-  口径（原土地类型 DLBM/DLMC ↔ 图斑类型 TBLX）与三调大类规则固化在提示词
-  知识卡中；`scripts/eval_sql_agent.py` 提供 7 个 golden 用例做准确率回归。
+  "查询 → 分析 → 问答"，路由目标 `sql`；白名单 = 图斑主表 + 图斑类型字典
+  `dict_tblx` + 合并地类字典表 `dict_land_classification_summary`（编码/名称/一级类/
+  三大类），提示词只描述表结构与口径规则，数据知识由模型按需 JOIN/查询；
+  `scripts/eval_sql_agent.py` 提供 7 个 golden 用例做准确率回归。
+- **确定性统计工具**（`tools/stat.py`）：`summarize_by_type` / `fragment_stats` /
+  `farmland_flow_summary` / `construction_change_summary` / `top_conversions`，
+  后端预写 SQL 固化 join、口径与合计，模型只调用并复述结果，提升统计稳定性；
+  前后时项比较统一在三大类层面（前时项走三调三级映射，后时项走 TBLX 模糊映射）。
+- **LLM 层稳定性**（`core/llm.py`）：流式工具调用按 index/id 分槽、名称去重，修复
+  工具名粘连（run_sqlrun_sql）问题；Agent 空回复自动重试一次。
+- **土地变化监测快报**（`skills/land-report/` + `report/briefing.py` +
+  `tools/report.py`）：`generate_briefing` 工具按默认模板生成 Word 快报（全库
+  统计、输出到仓库外目录，默认 `%LOCALAPPDATA%/GeoAgent/reports`，可用
+  `GEOAGENT_REPORTS_DIR` 覆盖）；`GET /api/files/reports/{文件名}` 提供下载，
+  前端支持 Word 在线预览（docx-preview）；TBLX→三大类默认模糊映射模板在
+  `skills/land-report/assets/tblx_categories.json`（用户提供正式规则后替换）；
+  疑似违法占地 v1 留空（需执法/审批数据）。
 - **养老可达性分析**（`analysis/` + `agents/elder_care.py` + `tools/accessibility.py`）：
   共享分析核心（数据集注册、1km 网格需求、步行路网、E2SFCA 与供需匹配），
   场景 Agent 已接入路由目标 `elder_care`；路网由脚本从 OSM PBF 构建，
   无路网时自动回退到直线距离估计并在结果中标注。
 - **服务层**（`server/`）：REST（会话 CRUD、模型切换、发消息）+ WebSocket 流式事件
   （token / route / tool_call / tool_result / artifact / message / error / turn_end）。
-- **验证**：77 个 pytest 用例全部通过；已用阿里千问 qwen3.7-flash 真实跑通
-  "加载数据集 → 点缓冲区 → GeoJSON artifact 输出"的完整链路。
+- **验证**：89 个 pytest 用例全部通过；7 个 golden 用例在 qwen3.7-max-2026-06-08
+  下真实跑通（7/7）。
 - **前端骨架**（`frontend/`）：左侧历史会话列表 + 右侧会话窗口；流式展示
   token / 路由 / 工具调用卡片（运行中/完成/失败）；GeoJSON 用 OpenLayers
   内嵌小地图渲染、表格用 HTML 表格渲染；会话级模型切换下拉框；Vite 代理
-  `/api`（含 WebSocket）到后端，前端不硬编码后端地址。
+  `/api`（含 WebSocket）到后端，前端不硬编码后端地址；工具卡片按中文名展示
+  （`src/toolLabels.js`），文件类 artifact 支持下载与 Word 预览。
 
 ### 近期主线（按顺序推进）
 
-1. **快报生成（skill 接入）**：以 skill 形式提供土地流向变化快报模板与生成流程，
-   在查询分析结果基础上按模板产出快报；
+1. **快报生成扩展**：v1 已接入 `skills/land-report`（默认模板、全库统计、docx
+   输出）；后续支持用户模板上传、单位换算与违法数据接入后扩展模板；
 2. **场景评估 Agent**（`agents/elder_care.py` 已实现；`agents/carrying.py` 规划中）：
    养老机构可达性分析评估已接入路由 `elder_care`；资源环境承载力评估待实现；
 3. 任务规划机制（复杂请求拆分为子任务/子图），按场景需要引入。
@@ -97,6 +113,8 @@ GeoAgent 是一个**通过自然语言对话完成地理空间分析与业务问
 - 长期记忆（记忆类型、检索、注入）
 - 工具失败兜底机制（重试 → 换工具 → 澄清 → 询问用户）
 - 文件上传（shp / GeoJSON / CSV）与真实数据集管理
+- 正式 TBLX→三大类映射（当前为默认模糊模板，待业务规则下发后替换）
+- 快报扩展：用户模板上传、单位换算、违法数据接入（当前违法段落留空）
 - 前端完善：更多 artifact 类型（图片/图表）、地图交互、多轮上下文展示
 - 多用户认证/权限、日志与可观测性
 
@@ -122,9 +140,14 @@ GeoAgent/
 │       │   ├── registry.py      # @register_tool 装饰器、Tool、schema 生成
 │       │   ├── executor.py      # 异步执行器（校验、错误归一化）
 │       │   ├── result.py        # ToolResult / Artifact
-│       │   ├── geo.py           # 地理演示工具
 │       │   ├── accessibility.py # 养老可达性分析工具（E2SFCA / 供需匹配）
-│       │   └── pg.py            # PostGIS 受控 SQL 查询工具层
+│       │   ├── labels.py        # 查询结果中文表头 / TBLX 中文名映射
+│       │   ├── categories.py    # TBLX→三大类 映射加载器（数据在技能资产 JSON）
+│       │   ├── pg.py            # PostGIS 受控 SQL 查询工具层
+│       │   ├── stat.py          # 确定性统计工具（按类型/细碎/耕地流向/建设用地/转换）
+│       │   └── report.py        # 快报生成工具（generate_briefing）
+│       ├── report/              # 快报统计与 docx 生成
+│       │   └── briefing.py      # 预定义统计 SQL + python-docx 渲染
 │       ├── memory/              # 记忆与会话
 │       │   ├── session.py       # 短期消息窗口（裁剪/摘要/清理）
 │       │   ├── store.py         # JSONL 会话存储
@@ -133,8 +156,7 @@ GeoAgent/
 │       ├── agents/              # 业务智能体与图编排
 │       │   ├── router.py        # 意图路由
 │       │   ├── chat.py          # 通用对话
-│       │   ├── geo.py           # 地理分析（工具循环）
-│       │   ├── sql.py           # 通用 SQL 问答 Agent
+│       │   ├── sql.py           # 土地变化统计 SQL 问答 Agent
 │       │   ├── elder_care.py    # 养老机构可达性评估 Agent
 │       │   ├── carrying.py      # 资源环境承载力评估 Agent（规划）
 │       │   └── graph.py         # build_geo_graph() 默认图
@@ -148,23 +170,27 @@ GeoAgent/
 │   └── src/
 │       ├── api/client.js        # REST 封装 + WebSocket 事件入口
 │       ├── stores/chat.js       # 轻量响应式会话 store
-│       ├── components/          # 会话列表 / 会话窗口 / 消息气泡 / 工具卡片 / artifact 渲染
+│       ├── toolLabels.js        # 工具英文标识 → 前端中文名
+│       ├── components/          # 会话列表/窗口/气泡/工具卡片/DocxPreview/Artifact 渲染
 │       └── style.css            # 全局样式
 ├── skills/                      # 技能目录（每个子目录一个技能：{name}/SKILL.md）
+│   ├── land-report/             # 土地变化监测快报（默认模板 + 统计需求清单）
 │   └── README.md                # 技能编写说明
 └── README.md
 ```
 
 > 目录中标注"规划"的文件尚未落地，实现后移除标注。
 > 快报生成以 skill 形式接入：技能目录为仓库根目录 `skills/`（模板与生成流程由
-> `skills/{name}/SKILL.md` 维护），业务代码只负责提供结构化查询结果。
+> `skills/{name}/SKILL.md` 维护），后端提供确定性统计与 docx 渲染能力
+> （`report/briefing.py` + `tools/report.py`）。
 
 ## 4. 开发规范
 
 ### 4.1 语言约定（重要）
 
-- **LLM 提示词一律英文**：system prompt、工具 name/description、参数 description、
-  路由指令等。英文指令对模型的遵从度和输出稳定性更好。
+- **LLM 提示词与描述统一中文**：system prompt、工具 description、参数 description、
+  路由指令、技能说明等。工具**调用名**保持英文标识（OpenAI 兼容接口要求 ASCII），
+  前端按 `toolLabels.js` 展示中文名。若模型遵从度下降，可整体切回英文并同步本文档。
 - **代码注释、文档、commit message 用中文**。
 - 模型生成的用户回复语言由模型根据用户输入自行决定（中文用户则中文回复）。
 
@@ -196,8 +222,10 @@ GeoAgent/
      注册，`params` 传 Pydantic 模型（自动生成 schema 并校验参数）；
   2. 返回 `ToolResult(content=给LLM的文本摘要, artifacts=[Artifact(kind, data)])`；
      完整数据放 artifacts，content 只放摘要（超长会被截断）；
-  3. 在 `tools/geo.py` 的 `get_geo_tools()` 或对应 Agent 的工具列表中加入；
+  3. 在对应业务 Agent 的工具列表中加入（SQL 类工具走受控层 `tools/pg.py`）；
   4. SQL 查询类工具必须走受控执行层（见 4.2），不得裸执行 LLM 生成的任意 SQL。
+  5. 高频/明确口径的统计模式建议做成**确定性工具**（参考 `tools/stat.py`：后端预写
+     SQL、Pydantic 参数、返回中文表格 artifact），并在 SQLAgent 提示词第 5 节登记。
   所有 Agent 共享的内置工具（task / list_skills / load_skill / compact）统一放在
   `tools/builtin.py`，在 `core/agent.py` 中自动合并，业务工具不要与内置工具重名。
   新增内置工具时同步更新本文档与 `backend/README.md` 的协议表。
@@ -206,7 +234,7 @@ GeoAgent/
   （name / description），正文为完整说明；技能名称只用于加载器注册表查询，
   不做文件路径拼接。参考 `skills/README.md`。
 - **新增 Agent**：继承 `core.agent.Agent`（提供 `name / system_prompt / tools / model`），
-  或按需写自定义 `Node`（参考 `agents/router.py`）。system prompt 用英文。
+  或按需写自定义 `Node`（参考 `agents/router.py`）。system prompt 用中文。
   场景类 Agent（如可达性、承载力）复用共享 SQL 工具层，只追加场景专用工具，
   不重复实现查询能力。
 - **修改图编排**：在 `agents/graph.py` 中用 `node - "action" >> next_node` 组合，
@@ -236,7 +264,8 @@ GeoAgent/
 - **事件协议是前后端唯一契约**：前端渲染只依赖 WebSocket 事件；新增事件必须
   同步登记在 `backend/README.md` 与本文档的协议表中。
 - artifact 渲染：新增可视化类型时，在 `components/ArtifactView.vue` 按 `kind`
-  分支渲染（geojson→OpenLayers、table→HTML 表格、其他→JSON 预览），并登记协议表。
+  分支渲染（geojson→OpenLayers、table→HTML 表格、file→下载链接/Word 预览、其他→
+  JSON 预览），并登记协议表。
 - 流式状态约定：`turn_start` 创建流式助手消息，`token` 逐字追加，`tool_call`
   生成工具卡片，`tool_result` 更新卡片状态，`artifact` 挂到最近的工具卡片下，
   `turn_end` 后以服务端持久化消息为准重建列表。
@@ -250,7 +279,7 @@ GeoAgent/
 | 事件类型 | 方向 | 字段 | 说明 |
 | --- | --- | --- | --- |
 | `turn_start` | 后端→前端 | `conversation_id` | 一轮对话开始 |
-| `route` | 后端→前端 | `target`, `reason` | 路由结果（sql / chat / geo / elder_care，规划扩展 carrying） |
+| `route` | 后端→前端 | `target`, `reason` | 路由结果（sql / elder_care / chat，规划扩展 carrying） |
 | `token` | 后端→前端 | `delta` | 流式增量文本 |
 | `tool_call` | 后端→前端 | `id`, `name`, `arguments` | 正在调用工具 |
 | `tool_result` | 后端→前端 | `id`, `name`, `is_error`, `content` | 工具结果摘要 |
@@ -279,10 +308,14 @@ npm run dev           # http://localhost:5173
 ```env
 OPENAI_API_KEY=sk-xxxx
 OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-GEOAGENT_DEFAULT_MODEL=qwen3.7-flash
+GEOAGENT_DEFAULT_MODEL=qwen3.7-max-2026-06-08
 
 # 土地变化检测库（PostgreSQL/PostGIS）
 GEOAGENT_PG_DSN=postgresql://user:pass@127.0.0.1:5432/land_change
+GEOAGENT_PG_WHITELIST=data."2026_1_change_landuse",knowledge_base.dict_tblx,knowledge_base.dict_land_classification_summary
+
+# 快报等生成文件输出目录（默认 %LOCALAPPDATA%/GeoAgent/reports，仓库外）
+GEOAGENT_REPORTS_DIR=
 
 # 技能目录（默认项目根目录 skills/）
 GEOAGENT_SKILLS_DIR=

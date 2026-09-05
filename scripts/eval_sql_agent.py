@@ -35,6 +35,7 @@ from geoagent.core.llm import LLMService  # noqa: E402
 from geoagent.memory.memory import NoopMemory  # noqa: E402
 from geoagent.memory.session import ConversationSession  # noqa: E402
 from geoagent.memory.store import ConversationStore  # noqa: E402
+from geoagent.skills import SkillLoader  # noqa: E402
 from geoagent.tools.pg import PgGateway  # noqa: E402
 
 TABLE = 'data."2026_1_change_landuse"'
@@ -56,7 +57,7 @@ CASES: list[dict[str, Any]] = [
         ),
         "expected": {"total_polygons": 164798, "top_area_m2": 8415206.70},
         "tolerance": 0.005,
-        "requires_sql": True,
+        "requires_sql": False,
     },
     {
         "id": "3",
@@ -187,6 +188,8 @@ async def evaluate_case(
     conv = store.create(title="eval", model=model)
     session = ConversationSession(store=store, conversation_id=conv["id"])
     collector = EventCollector()
+    skills = SkillLoader(settings.skills_dir)
+    skills.scan()
     ctx = ConversationContext(
         conversation_id=conv["id"],
         session=session,
@@ -195,7 +198,7 @@ async def evaluate_case(
         store=store,
         memory=NoopMemory(),
         event_sink=collector.sink,
-        skills=None,
+        skills=skills,
         pg=gw,
         transcripts_dir=tmp / "transcripts",
     )

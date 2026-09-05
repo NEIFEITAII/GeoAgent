@@ -24,6 +24,7 @@ class ConversationContext:
     event_sink: Optional[EventSink] = None
     skills: Any = None  # 类型：skills.SkillLoader（技能加载器）
     pg: Any = None  # 类型：tools.pg.PgGateway（受控数据库网关，未配置时为 None）
+    reports_dir: Any = None  # 类型：Path（快报等生成文件的输出目录，默认在仓库外）
     subagent_depth: int = 0
     subagents: list[dict[str, Any]] = field(default_factory=list)
     compact_requested: bool = False

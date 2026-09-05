@@ -1,27 +1,64 @@
 <template>
   <div class="artifact">
-    <div v-if="artifact.kind === 'geojson'" ref="mapEl" class="mini-map"></div>
-    <table v-else-if="artifact.kind === 'table'" class="artifact-table">
-      <thead>
-        <tr>
-          <th v-for="c in artifact.data.columns" :key="c">{{ c }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="(row, i) in artifact.data.rows" :key="i">
-          <td v-for="(c, j) in artifact.data.columns" :key="c">
-            {{ cellValue(row, c, j) }}
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <!-- 地图结果 -->
+    <div v-if="artifact.kind === 'geojson'" class="map-card">
+      <div class="artifact-head">
+        <Icon name="map-pin" :size="14" />
+        <span>{{ artifact.name || '空间分布图' }}</span>
+      </div>
+      <div ref="mapEl" class="mini-map"></div>
+    </div>
+
+    <!-- 表格结果 -->
+    <div v-else-if="artifact.kind === 'table'" class="table-card">
+      <div class="artifact-head">
+        <Icon name="chart" :size="14" />
+        <span>{{ artifact.name || '查询结果' }}</span>
+        <span style="margin-left: auto; font-size: 12px; color: var(--text-3)">
+          {{ rows.length }} 行
+        </span>
+        <button class="icon-btn" title="复制为 CSV" @click="copyTable">
+          <Icon :name="copied ? 'check' : 'copy'" :size="14" />
+        </button>
+      </div>
+      <div class="table-scroll">
+        <table class="artifact-table">
+          <thead>
+            <tr>
+              <th v-for="c in columns" :key="c">{{ c }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, i) in rows" :key="i">
+              <td v-for="(c, j) in columns" :key="c">{{ cellValue(row, c, j) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 文件结果 -->
+    <div v-else-if="artifact.kind === 'file'" class="file-chip" :title="filename">
+      <Icon name="file" class="file-icon" :size="15" />
+      <span class="file-name">{{ filename }}</span>
+      <a
+        class="icon-link"
+        :href="fileUrl"
+        :download="filename"
+        title="下载文件"
+        @click.stop
+      >
+        <Icon name="download" :size="14" />
+      </a>
+    </div>
+
+    <!-- 其他类型：JSON 预览 -->
     <pre v-else class="artifact-json">{{ JSON.stringify(artifact.data, null, 2) }}</pre>
-    <div v-if="artifact.name" class="artifact-name">{{ artifact.name }}</div>
   </div>
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import GeoJSON from 'ol/format/GeoJSON'
 import Map from 'ol/Map'
 import TileLayer from 'ol/layer/Tile'
@@ -30,19 +67,48 @@ import { fromLonLat } from 'ol/proj'
 import OSM from 'ol/source/OSM'
 import VectorSource from 'ol/source/Vector'
 import View from 'ol/View'
+import Icon from './Icon.vue'
 
 const props = defineProps({
   artifact: { type: Object, required: true },
 })
 
-// 兼容两种行格式：对象行按列名取值，数组行按下标取值。
+const mapEl = ref(null)
+const copied = ref(false)
+let map = null
+let copyTimer = null
+
+const columns = computed(() => props.artifact.data?.columns || [])
+const rows = computed(() => props.artifact.data?.rows || [])
+const filename = computed(() => props.artifact.data?.filename || props.artifact.name || '文件')
+const fileUrl = computed(() => props.artifact.data?.url || '')
+
+// 兼容两种行格式：对象行按列名取值，数组行按下标取值
 function cellValue(row, column, index) {
   if (Array.isArray(row)) return row[index]
   return row[column]
 }
 
-const mapEl = ref(null)
-let map = null
+async function copyTable() {
+  const esc = (v) => {
+    const s = String(v ?? '')
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const csv = [
+    columns.value.map(esc).join(','),
+    ...rows.value.map((r) => columns.value.map((c, j) => esc(cellValue(r, c, j))).join(',')),
+  ].join('\n')
+  try {
+    await navigator.clipboard.writeText(csv)
+    copied.value = true
+    if (copyTimer) clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => {
+      copied.value = false
+    }, 1600)
+  } catch {
+    // 剪贴板权限被拒时静默忽略
+  }
+}
 
 onMounted(() => {
   if (props.artifact.kind !== 'geojson' || !mapEl.value) return
@@ -66,6 +132,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (copyTimer) clearTimeout(copyTimer)
   if (map) {
     map.setTarget(undefined)
     map = null

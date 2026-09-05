@@ -51,7 +51,7 @@ uv run --env-file .env uvicorn geoagent.server.app:app --reload --port 8000
 | 事件类型 | 方向 | 字段 | 说明 |
 | --- | --- | --- | --- |
 | `turn_start` | 服务端→客户端 | `conversation_id` | 一轮对话开始 |
-| `route` | 服务端→客户端 | `target`, `reason` | 路由结果（sql / geo / elder_care / chat） |
+| `route` | 服务端→客户端 | `target`, `reason` | 路由结果（sql / elder_care / chat） |
 | `token` | 服务端→客户端 | `delta` | 流式增量文本 |
 | `tool_call` | 服务端→客户端 | `id`, `name`, `arguments` | 正在调用工具 |
 | `tool_result` | 服务端→客户端 | `id`, `name`, `is_error`, `content` | 工具执行结果（摘要文本） |
@@ -90,16 +90,14 @@ node scripts/smoke.mjs
 ```python
 from geoagent.agents import build_geo_graph
 
-# RouterNode 判断意图 -> "sql" 走 SQLAgent（数据库问答），
-# "elder_care" 走 ElderCareAgent，"geo" 走 GeoAgent，否则 ChatAgent
+# RouterNode 判断意图 -> "sql" 走 SQLAgent（土地变化统计/数据库问答），
+# "elder_care" 走 ElderCareAgent，否则 ChatAgent
 router = RouterNode(model="qwen3.7-flash")
 sql = SQLAgent(model="qwen3.7-plus")
 elder = ElderCareAgent(model="qwen3.7-plus")
-geo = GeoAgent(model="qwen3.7-plus")
 chat = ChatAgent()
 router - "sql" >> sql
 router - "elder_care" >> elder
-router - "geo" >> geo
 router - "chat" >> chat
 flow = Flow(router)
 ```
@@ -144,9 +142,10 @@ flow = Flow(router)
 受控护栏（任一不满足即拒绝并返回结构化错误）：
 
 - 仅允许单条 SELECT（禁止 WITH / EXPLAIN / 分号 / 任何 DML / DDL）
-- 表/视图白名单：仅 `data."2026_1_change_landuse"`（2026 年第一期地类变化图斑表，
-  可用 `GEOAGENT_PG_WHITELIST`
-  覆盖）；地类字典与业务口径固化在 SQLAgent 提示词知识卡中，不再暴露为可查询表
+- 表/视图白名单：图斑主表 `data."2026_1_change_landuse"` + 图斑类型字典
+  `knowledge_base.dict_tblx` + 合并地类字典表
+  `knowledge_base.dict_land_classification_summary`（原三张地类字典合并，含编码/名称/
+  一级类/三大类；可用 `GEOAGENT_PG_WHITELIST` 覆盖）
 - 强制外层 LIMIT（默认 200 行，`GEOAGENT_PG_MAX_ROWS` 可调）
 - 查询超时（默认 10 秒，`GEOAGENT_PG_TIMEOUT_S` 可调）
 - 查询审计日志（`data/pg_audit.jsonl`，含 SQL、耗时、行数、错误）
@@ -155,21 +154,28 @@ flow = Flow(router)
 SQL 中需按 `describe_table` 返回的原文加双引号，否则 PostgreSQL 会折叠为小写
 导致"列不存在"。
 
-业务口径（已写入 SQLAgent 提示词知识卡）：
+业务口径（已写入 SQLAgent 提示词）：
 
 - 原土地类型 = `"DLBM"`/`"DLMC"`（三调地类体系，含农用地/建设用地/未利用地大类）
 - 图斑类型（变化后） = `"TBLX"`（影像地类体系，33 类；数据中 1-4 前导零为 01-04）
 - 面积 `"MJ"` 单位平方米（当前按平方米测试，确认其他单位后再调整）
 - 无修饰的"地类/耕地/建设用地"默认按原土地类型统计；"图斑类型/变化后"按 `TBLX`
+- TBLX→三大类：默认模糊映射模板（`skills/land-report/assets/tblx_categories.json`），
+  用户提供正式规则后替换
 
 展示映射：`run_sql` 返回表格的表头与 `TBLX` 值自动映射为中文
 （见 `geoagent/tools/labels.py`）；字段语义或字典更新时需同步该文件。
+
+提示词瘦身：SQLAgent 的 system prompt 只保留"表结构索引 + 口径 + 纪律"；
+编码/名称/一级类等数据知识放在白名单字典（dict_tblx、合并表
+dict_land_classification_summary）中，由模型按需 JOIN/查询；其他字段结构用
+describe_table 查看，快报流程在 `skills/land-report`。
 
 连接串从环境变量读取（禁止硬编码账号密码）：
 
 ```env
 GEOAGENT_PG_DSN=postgresql://user:pass@192.168.3.209:5432/zhejiang_agent_project
-GEOAGENT_PG_WHITELIST=data."2026_1_change_landuse"
+GEOAGENT_PG_WHITELIST=data."2026_1_change_landuse",knowledge_base.dict_tblx,knowledge_base.dict_land_classification_summary
 ```
 
 准确率评估（手动运行，真实库 + 真实 LLM）：
@@ -179,14 +185,31 @@ backend/.venv/Scripts/python.exe scripts/eval_sql_agent.py --refs-only   # 只�
 backend/.venv/Scripts/python.exe scripts/eval_sql_agent.py               # 跑 LLM 问答并比对
 ```
 
+## 土地变化监测快报（land-report）
+
+对话中说"生成快报/简报"时，SQLAgent 按 `skills/land-report/SKILL.md` 流程调用
+`generate_briefing` 工具：对图斑表全量执行预定义统计（耕地流出/流入/净变化、
+流向建设用地、恢复性地类流入、新增建设用地、净减少/新增面积 Top10 县等），
+按默认模板结构生成 Word 文件到**仓库外**的目录
+（默认 `%LOCALAPPDATA%/GeoAgent/reports`，可用 `GEOAGENT_REPORTS_DIR` 覆盖）。
+前端通过 `GET /api/files/reports/{文件名}` 下载/预览（返回 .docx，文件名做目录穿越校验）。
+
+工具/技能展示已中文化：前端工具卡片按中文名展示（映射见
+`frontend/src/toolLabels.js`），工具描述、技能说明与 SQLAgent/路由提示词均为中文。
+
+- 口径与 SQLAgent 知识卡一致：原土地类型 = DLBM/DLMC，图斑类型 = TBLX；
+  TBLX→三大类使用临时映射 `geoagent/tools/categories.py`（正式映射下发后替换）
+- 面积单位平方米，暂未换算；疑似违法占地段落留空（需执法/审批数据）
+- 用户模板上传与单位换算为后续扩展项
+
 ## 目录
 
 ```text
 geoagent/
 ├── core/          # node(图) / llm(模型切换) / agent(智能体循环) / context / events
-├── tools/         # 装饰器注册 + Pydantic 校验 + 执行器 + geo 演示工具 + pg 受控 SQL 层
+├── tools/         # 装饰器注册 + Pydantic 校验 + 执行器 + pg 受控 SQL 层 + 快报/统计工具
 ├── memory/        # 短期会话窗口（滚动摘要/截断） + 会话存储 + 长期记忆接口占位
-├── agents/        # 路由器 / SQL 问答 / 通用对话 / 地理分析 / 养老评估 Agent 与图编排
+├── agents/        # 路由器 / SQL 问答 / 通用对话 / 养老评估 Agent 与图编排
 └── server/        # FastAPI 应用与路由
 ```
 

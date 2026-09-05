@@ -1,33 +1,79 @@
 <template>
   <aside class="sidebar">
-    <div class="sidebar-header">
-      <span class="logo">GeoAgent</span>
-      <button class="new-btn" title="新建会话" @click="onNew">＋</button>
+    <div class="sidebar-head">
+      <span class="sidebar-title">会话</span>
+      <button class="icon-btn" title="新建会话" @click="onNew">
+        <Icon name="plus" :size="17" />
+      </button>
     </div>
-    <ul class="conv-list">
-      <li
-        v-for="c in chat.conversations"
-        :key="c.id"
-        :class="{ active: c.id === chat.currentId }"
-        @click="onSelect(c.id)"
-      >
-        <div class="conv-title-row">
-          <div class="conv-title">{{ c.title }}</div>
-          <button
-            class="del-btn"
-            title="删除会话"
-            @click.stop="onDelete(c.id)"
-          >×</button>
+
+    <div v-if="groups.length" class="conv-groups">
+      <div v-for="group in groups" :key="group.label" class="conv-group">
+        <div class="group-label">{{ group.label }}</div>
+        <div
+          v-for="c in group.items"
+          :key="c.id"
+          class="conv-item"
+          :class="{ active: c.id === chat.currentId }"
+          @click="onSelect(c.id)"
+        >
+          <div class="conv-main">
+            <span class="conv-title">{{ c.title || '新对话' }}</span>
+            <span class="icon-btn del-conv" title="删除会话" @click.stop="askDelete(c)">
+              <Icon name="trash" :size="13" />
+            </span>
+          </div>
+          <div class="conv-meta">{{ metaText(c) }}</div>
         </div>
-        <div class="conv-meta">{{ c.model }} · {{ timeAgo(c.updated_at) }}</div>
-      </li>
-    </ul>
-    <div class="sidebar-footer">Dev 模式 · 会话全局可见</div>
+      </div>
+    </div>
+    <div v-else class="conv-empty">暂无会话，点击右上角新建</div>
+
+    <div class="sidebar-foot">Dev 模式 · 会话全局可见</div>
+
+    <Modal v-if="deleting" title="删除会话" size="sm" @close="deleting = null">
+      <p style="margin: 0; line-height: 1.7">
+        确定删除「{{ deleting.title || '新对话' }}」吗？删除后不可恢复。
+      </p>
+      <template #footer>
+        <button class="btn btn-ghost" @click="deleting = null">取消</button>
+        <button class="btn btn-danger" @click="onDeleteConfirmed">删除</button>
+      </template>
+    </Modal>
   </aside>
 </template>
 
 <script setup>
+import { computed, ref } from 'vue'
+import Icon from './Icon.vue'
+import Modal from './Modal.vue'
 import { chat } from '../stores/chat'
+import { formatWhen, shortModel } from '../display'
+
+const deleting = ref(null)
+
+const groups = computed(() => {
+  const labels = ['今天', '昨天', '近 7 天', '更早']
+  const buckets = labels.map((label) => ({ label, items: [] }))
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const day = (t) => Math.floor((startOfToday - new Date(t)) / 86400000)
+  for (const c of chat.conversations) {
+    const diff = day(c.updated_at || Date.now())
+    const idx = diff <= 0 ? 0 : diff === 1 ? 1 : diff <= 7 ? 2 : 3
+    buckets[idx].items.push(c)
+  }
+  return buckets.filter((b) => b.items.length)
+})
+
+function metaText(c) {
+  const parts = []
+  const model = shortModel(c.model)
+  if (model) parts.push(model)
+  const when = formatWhen(c.updated_at)
+  if (when) parts.push(when)
+  return parts.join(' · ')
+}
 
 async function onSelect(id) {
   try {
@@ -45,23 +91,18 @@ async function onNew() {
   }
 }
 
-async function onDelete(id) {
-  if (!window.confirm('确定删除该会话吗？删除后不可恢复。')) return
+function askDelete(c) {
+  deleting.value = c
+}
+
+async function onDeleteConfirmed() {
+  const target = deleting.value
+  deleting.value = null
+  if (!target) return
   try {
-    await chat.deleteConversation(id)
+    await chat.deleteConversation(target.id)
   } catch (err) {
     chat.error = err.message
   }
-}
-
-function timeAgo(iso) {
-  if (!iso) return ''
-  const diff = Date.now() - new Date(iso).getTime()
-  const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return '刚刚'
-  if (minutes < 60) return `${minutes} 分钟前`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} 小时前`
-  return `${Math.floor(hours / 24)} 天前`
 }
 </script>

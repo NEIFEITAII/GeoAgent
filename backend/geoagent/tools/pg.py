@@ -564,19 +564,13 @@ class ListTablesParams(BaseModel):
 
 class DescribeTableParams(BaseModel):
     table: str = Field(
-        description=(
-            'Qualified table name, e.g. data."2026_1_change_landuse"'
-        )
+        description='表名（带 schema），例如 data."2026_1_change_landuse"'
     )
 
 
 class RunSqlParams(BaseModel):
     sql: str = Field(
-        description=(
-            "Plain read-only SELECT statement. Single statement only: no WITH, "
-            "no EXPLAIN, no semicolons, no data modification. A LIMIT is enforced "
-            "automatically."
-        )
+        description="只读 SELECT 单语句（禁止 WITH/EXPLAIN/分号/写操作；自动强制 LIMIT）"
     )
 
 
@@ -595,7 +589,7 @@ def _no_gateway_result(name: str) -> ToolResult:
 
 @register_tool(
     "list_tables",
-    "List available database tables (read-only whitelist of the land-change database)",
+    "列出当前只读白名单内的数据库表（含表名与说明）",
     ListTablesParams,
 )
 async def list_tables(ctx: Any) -> ToolResult:
@@ -634,7 +628,7 @@ async def list_tables(ctx: Any) -> ToolResult:
 
 @register_tool(
     "describe_table",
-    "Describe columns of a whitelisted database table (names, types, nullability)",
+    "查看白名单表的列结构（列名/类型/是否可空）",
     DescribeTableParams,
 )
 async def describe_table(ctx: Any, table: str) -> ToolResult:
@@ -682,7 +676,7 @@ def _row_summary(columns: list[str], rows: list[dict[str, Any]]) -> str:
         return "columns: (none)"
     parts = [f"columns: {', '.join(columns)}"]
     # 小结果全量展示，避免模型误把"前几行"当成全部；大结果只给前 10 行并提示剩余。
-    max_rows = len(rows) if len(rows) <= 30 else 10
+    max_rows = len(rows) if len(rows) <= 100 else 10
     for row in rows[:max_rows]:
         parts.append(" | ".join(str(row.get(c, ""))[:40] for c in columns))
     if len(rows) > max_rows:
@@ -692,7 +686,7 @@ def _row_summary(columns: list[str], rows: list[dict[str, Any]]) -> str:
 
 @register_tool(
     "run_sql",
-    "Run a read-only SELECT query on the whitelisted land-change database (LIMIT enforced)",
+    "在受控只读库上执行 SELECT 查询并返回表格（自动强制 LIMIT）",
     RunSqlParams,
 )
 async def run_sql(ctx: Any, sql: str) -> ToolResult:

@@ -259,6 +259,21 @@ async function switchModel(model) {
   if (conv) conv.model = model
 }
 
+// 修改最后一条用户问题：先撤掉服务端旧问题与旧回答，再以新内容重新发起一轮
+async function editAndResend(content) {
+  const text = String(content || '').trim()
+  if (!text || !chat.currentId || chat.streaming) return false
+  try {
+    await api.rollbackLastUserTurn(chat.currentId)
+  } catch (err) {
+    chat.error = err.message
+    return false
+  }
+  await refreshMessages()
+  refreshConversations().catch(() => {})
+  return sendMessage(text)
+}
+
 function sendMessage(content) {
   const text = String(content || '').trim()
   if (!text || chat.streaming || !chat._ws || chat._ws.readyState !== WebSocket.OPEN) return false
@@ -272,4 +287,5 @@ chat.selectConversation = selectConversation
 chat.createConversation = createConversation
 chat.deleteConversation = deleteConversation
 chat.switchModel = switchModel
+chat.editAndResend = editAndResend
 chat.sendMessage = sendMessage

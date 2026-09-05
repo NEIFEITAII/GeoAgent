@@ -61,6 +61,7 @@ class Agent(Node):
         compactor = ContextCompactor(
             transcripts_dir=getattr(ctx, "transcripts_dir", None)
         )
+        empty_retries = 0
 
         for _ in range(self.max_turns):
             # 每次调用模型前先执行四步压缩管线（参考 learn-claude-code s08）。
@@ -127,6 +128,13 @@ class Agent(Node):
             subagents = getattr(ctx, "subagents", None)
             if subagents:
                 final_dict["subagents"] = list(subagents)
+            if not final.tool_calls and not (final.content or "").strip() and empty_retries < 1:
+                # 空回复重试一次：不落库，提示模型基于已有工具结果给出回答。
+                empty_retries += 1
+                ctx.session.add_user(
+                    "你还没有给出最终回答。请基于已有的工具结果，直接输出完整的中文回答。"
+                )
+                continue
             ctx.session.add_message(final_dict)
             if not final.tool_calls:
                 break

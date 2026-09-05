@@ -6,10 +6,14 @@ from pathlib import Path
 from typing import Any
 
 
-# 土地变化检测库默认白名单：统计智能体只查询这一张图斑表。
-# 地类字典与业务口径（原/现土地类型、三调大类、编码映射）固化在 SQLAgent 提示词中，
-# 不再作为可查询表暴露给 LLM（可通过 GEOAGENT_PG_WHITELIST 覆盖）。
-DEFAULT_PG_WHITELIST: list[str] = ['data."2026_1_change_landuse"']
+# 土地变化检测库默认白名单：图斑主表 + 地类字典/元数据表。
+# 提示词只描述表结构与口径，编码/名称/大类等"数据知识"由模型按需查询，
+# 避免提示词背字典造成漂移（可通过 GEOAGENT_PG_WHITELIST 覆盖）。
+DEFAULT_PG_WHITELIST: list[str] = [
+    'data."2026_1_change_landuse"',
+    "knowledge_base.dict_tblx",
+    "knowledge_base.dict_land_classification_summary",
+]
 
 
 @dataclass(frozen=True)
@@ -60,6 +64,13 @@ def default_model_registry() -> dict[str, ModelProfile]:
             api_key_env="OPENAI_API_KEY",
             description="Alibaba Qwen3.7-Plus (DashScope)",
         ),
+        "qwen3.7-max-2026-06-08": ModelProfile(
+            id="qwen3.7-max-2026-06-08",
+            provider="openai_compatible",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            api_key_env="OPENAI_API_KEY",
+            description="Alibaba Qwen3.7-Max (DashScope)",
+        ),
     }
 
 
@@ -85,6 +96,11 @@ class Settings:
         self.pg_max_rows = int(os.getenv("GEOAGENT_PG_MAX_ROWS", "200"))
         self.pg_timeout_s = float(os.getenv("GEOAGENT_PG_TIMEOUT_S", "10"))
         self.pg_audit_path = self.data_dir / "pg_audit.jsonl"
+        # 快报等生成文件输出到仓库外的用户数据目录（默认 %LOCALAPPDATA%/GeoAgent/reports）。
+        base_data_home = Path(os.getenv("LOCALAPPDATA", str(Path.home())))
+        self.reports_dir = Path(
+            os.getenv("GEOAGENT_REPORTS_DIR", str(base_data_home / "GeoAgent" / "reports"))
+        )
 
     def profile(self, model_id: str) -> ModelProfile:
         try:

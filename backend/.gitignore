@@ -9,6 +9,7 @@ __pycache__/
 # 运行产物：会话记录与查询审计日志不入库
 conversations/
 pg_audit.jsonl
+reports/
 
 # 测试与质量工具产物
 .coverage

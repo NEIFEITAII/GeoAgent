@@ -9,21 +9,18 @@ ROUTE_TOOL = {
     "type": "function",
     "function": {
         "name": "route",
-        "description": "Route the user request to the right agent",
+        "description": "判断用户请求应交给哪个智能体",
         "parameters": {
             "type": "object",
             "properties": {
                 "target": {
                     "type": "string",
-                    "enum": ["sql", "geo", "elder_care", "chat"],
+                    "enum": ["sql", "elder_care", "chat"],
                     "description": (
-                        "sql: database queries / land change statistics / tables / "
-                        "aggregations / land-use type changes; "
-                        "geo: spatial analysis / data / map / coordinates / buffer / "
-                        "distance / area / layers; "
-                        "elder_care: elderly care facility accessibility / nursing "
-                        "homes / coverage / beds / supply-demand matching; "
-                        "chat: anything else"
+                        "sql: 数据库查询与土地变化统计（计算/统计/汇总/面积/占比/"
+                        "每种类型/耕地/建设用地/地类/图斑/流向、快报/简报生成）；"
+                        "elder_care: 养老机构可达性/覆盖/床位/供需分析；"
+                        "chat: 其它"
                     ),
                 }
             },
@@ -33,41 +30,14 @@ ROUTE_TOOL = {
 }
 
 ROUTER_SYSTEM_PROMPT = (
-    "You are the intent router of GeoAgent. Decide which agent should handle the "
-    "user request and set the target accordingly:\n"
-    "- sql: questions that should be answered by querying the land-change database, "
-    "such as table queries, statistics, aggregations, land-use type changes "
-    "(耕地/建设用地/地类/图斑 etc.), or SQL questions.\n"
-    "- geo: general spatial analysis, loading datasets, maps, coordinates, buffer, "
-    "distance, area, layers, or map visualization.\n"
-    "- elder_care: elderly care facility accessibility, nursing homes, coverage, "
-    "beds, or supply-demand matching.\n"
-    "- chat: anything else."
+    "你是 GeoAgent 的意图路由器，判断用户请求应交给哪个智能体：\n"
+    "- sql：需要查询土地变化数据库回答的问题，例如查询/统计/汇总/计算/面积/占比/"
+    "每种类型（耕地、建设用地、地类、图斑、流向等）或生成快报/简报。\n"
+    "- elder_care：养老机构可达性、覆盖率、床位、供需匹配等分析。\n"
+    "- chat：其它内容。"
 )
 
 # 当路由模型不可用时的兜底方案。
-ROUTE_GEO_KEYWORDS = (
-    "缓冲区",
-    "buffer",
-    "距离",
-    "面积",
-    "图层",
-    "数据",
-    "坐标",
-    "加载",
-    "叠加",
-    "裁剪",
-    "相交",
-    "地图",
-    "poi",
-    "兴趣点",
-    "geojson",
-    "shp",
-    "矢量",
-    "栅格",
-    "分析",
-)
-
 ROUTE_ELDER_CARE_KEYWORDS = (
     "养老",
     "老年",
@@ -88,6 +58,12 @@ ROUTE_SQL_KEYWORDS = (
     "查询",
     "统计",
     "汇总",
+    "计算",
+    "面积",
+    "占比",
+    "净变化",
+    "流出",
+    "流入",
     "sql",
     "数据库",
     "数据表",
@@ -105,6 +81,11 @@ ROUTE_SQL_KEYWORDS = (
     "select",
     "count",
     "sum",
+    "快报",
+    "简报",
+    "监测报告",
+    "生成报告",
+    "总结报告",
     "group by",
     "join",
     "where",
@@ -112,7 +93,7 @@ ROUTE_SQL_KEYWORDS = (
 
 
 class RouterNode(Node):
-    """将用户请求路由到 SQL / 地理 / 养老 / 通用对话智能体。"""
+    """将用户请求路由到 SQL / 养老 / 通用对话智能体。"""
 
     def __init__(self, model: Optional[str] = None) -> None:
         super().__init__(name="router")
@@ -134,7 +115,7 @@ class RouterNode(Node):
             )
             if message.tool_calls:
                 candidate = message.tool_calls[0].arguments.get("target")
-            if candidate in ("sql", "geo", "elder_care", "chat"):
+            if candidate in ("sql", "elder_care", "chat"):
                 target = candidate
             reason = message.content or ""
         except Exception:
@@ -144,8 +125,6 @@ class RouterNode(Node):
                 target = "elder_care"
             elif any(k in lowered for k in ROUTE_SQL_KEYWORDS):
                 target = "sql"
-            elif any(k in lowered for k in ROUTE_GEO_KEYWORDS):
-                target = "geo"
             else:
                 target = "chat"
             reason = "heuristic fallback (router model unavailable)"

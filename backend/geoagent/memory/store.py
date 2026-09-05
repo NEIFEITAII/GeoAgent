@@ -164,3 +164,42 @@ class ConversationStore:
             except json.JSONDecodeError:
                 continue
         return messages
+
+    def rollback_last_user_turn(self, conversation_id: str) -> Optional[dict[str, Any]]:
+        """撤回最后一条用户消息及其回答（用于“修改后重新生成”）。
+
+        前端修改文字后会先调用本方法清掉旧问题与旧回答，
+        再以新内容正常发起一轮，避免服务端历史出现重复的用户消息。
+        返回被撤回的原用户消息；若会话不存在或没有用户消息则返回 None。
+        """
+        conv = self._meta.get(conversation_id)
+        if conv is None:
+            return None
+        path = self._conv_path(conversation_id)
+        if not path.exists():
+            return None
+        lines = path.read_text(encoding="utf-8").splitlines()
+        # 从尾部向前找最后一条用户消息（用户消息后的内容都是它的回答）
+        target_index = -1
+        for i in range(len(lines) - 1, -1, -1):
+            line = lines[i].strip()
+            if not line:
+                continue
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if msg.get("role") == "user":
+                target_index = i
+                break
+        if target_index < 0:
+            return None
+        old_message = json.loads(lines[target_index])
+        # 只保留最后一条用户消息之前的内容；该条消息与其后的旧回答一并移除
+        kept_lines = lines[:target_index]
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text("\n".join(kept_lines) + "\n", encoding="utf-8")
+        tmp.replace(path)
+        conv["updated_at"] = _utc_now_iso()
+        self._save_meta()
+        return dict(old_message)

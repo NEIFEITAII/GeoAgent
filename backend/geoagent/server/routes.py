@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+from pathlib import PurePath
 
 from ..agents.graph import build_geo_graph
 from ..core.context import ConversationContext
@@ -18,6 +20,23 @@ router = APIRouter(prefix="/api")
 
 def _store(request: Request) -> ConversationStore:
     return request.app.state.store
+
+
+@router.get("/files/reports/{filename}")
+async def download_report(filename: str, request: Request) -> FileResponse:
+    """下载生成的 Word 快报（仅限 reports 目录内 .docx 文件）。"""
+    safe = PurePath(filename).name
+    if safe != filename or not safe.lower().endswith(".docx"):
+        raise HTTPException(status_code=400, detail="非法文件名")
+    reports_dir = request.app.state.settings.reports_dir
+    path = (reports_dir / safe).resolve()
+    if not path.is_relative_to(reports_dir.resolve()) or not path.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=safe,
+    )
 
 
 def _conversation_or_404(store: ConversationStore, conversation_id: str) -> dict[str, Any]:
@@ -119,6 +138,7 @@ async def send_message(
         event_sink=None,
         skills=request.app.state.skills,
         pg=request.app.state.pg,
+        reports_dir=request.app.state.settings.reports_dir,
         transcripts_dir=request.app.state.settings.data_dir / "transcripts",
     )
     try:
@@ -127,6 +147,20 @@ async def send_message(
     except LLMConfigurationError as exc:
         raise HTTPException(status_code=502, detail=f"模型不可用: {exc}") from exc
     return {"reply": payload.content, "model": payload.model or conv["model"]}
+
+
+@router.post("/conversations/{conversation_id}/rollback-last-user-turn")
+async def rollback_last_user_turn(
+    conversation_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    """撤回最后一条用户消息及其回答（前端修改文字后以新内容重新发起）。"""
+    store = _store(request)
+    _conversation_or_404(store, conversation_id)
+    old = store.rollback_last_user_turn(conversation_id)
+    if old is None:
+        raise HTTPException(status_code=409, detail="conversation has no user message")
+    return {"ok": True, "removed": old.get("content", "")}
 
 
 async def _ws_send(websocket: WebSocket, event: Event) -> None:
@@ -155,6 +189,7 @@ async def chat_ws(websocket: WebSocket, conversation_id: str) -> None:
         event_sink=lambda event: _ws_send(websocket, event),
         skills=app.state.skills,
         pg=app.state.pg,
+        reports_dir=app.state.settings.reports_dir,
         transcripts_dir=app.state.settings.data_dir / "transcripts",
     )
     try:
