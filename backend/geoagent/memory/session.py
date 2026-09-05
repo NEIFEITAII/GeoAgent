@@ -49,6 +49,18 @@ class ConversationSession:
     def clear(self) -> None:
         self._messages = []
 
+    def restore(self) -> None:
+        """从绑定的会话存储载入已持久化的历史消息。
+
+        新建连接/请求时调用：磁盘 JSONL 是权威的全量历史（内存压缩只影响当前
+        连接内的 LLM 上下文），恢复后顺带清理孤儿 tool 消息，避免脏历史进入模型。
+        未绑定 store（如子 Agent 的全新会话）时为空操作。
+        """
+        if self.store is None or not self.conversation_id:
+            return
+        self._messages = self.store.messages(self.conversation_id)
+        self.drop_orphan_tool_messages()
+
     def build_llm_messages(
         self,
         system_prompt: Optional[str] = None,

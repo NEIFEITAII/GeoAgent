@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pathlib import PurePath
 
 from ..agents.graph import build_geo_graph
-from ..core.context import ConversationContext
+from ..core.context import ConversationContext, EventSink
 from ..core.events import Event
 from ..core.llm import LLMConfigurationError
 from ..memory.memory import NoopMemory
@@ -44,6 +44,34 @@ def _conversation_or_404(store: ConversationStore, conversation_id: str) -> dict
     if conv is None:
         raise HTTPException(status_code=404, detail="conversation not found")
     return conv
+
+
+def _new_context(
+    app: Any,
+    conversation: dict[str, Any],
+    event_sink: Optional[EventSink] = None,
+) -> ConversationContext:
+    """创建一次对话轮次的运行时上下文，并从持久化历史恢复消息窗口。
+
+    同一会话在断线重连 / 切换会话后重新建立连接时，内存中的旧 session 已不存在，
+    这里把 JSONL 中已持久化的历史消息载入新的 ConversationSession，保证多轮续聊。
+    """
+    store = app.state.store
+    session = ConversationSession(store=store, conversation_id=conversation["id"])
+    session.restore()
+    return ConversationContext(
+        conversation_id=conversation["id"],
+        session=session,
+        model=conversation["model"],
+        llm=app.state.llm,
+        store=store,
+        memory=NoopMemory(),
+        event_sink=event_sink,
+        skills=app.state.skills,
+        pg=app.state.pg,
+        reports_dir=app.state.settings.reports_dir,
+        transcripts_dir=app.state.settings.data_dir / "transcripts",
+    )
 
 
 @router.get("/health")
@@ -127,20 +155,7 @@ async def send_message(
     if not body.content.strip():
         raise HTTPException(status_code=400, detail="content is empty")
 
-    session = ConversationSession(store=store, conversation_id=conversation_id)
-    ctx = ConversationContext(
-        conversation_id=conversation_id,
-        session=session,
-        model=conv["model"],
-        llm=request.app.state.llm,
-        store=store,
-        memory=NoopMemory(),
-        event_sink=None,
-        skills=request.app.state.skills,
-        pg=request.app.state.pg,
-        reports_dir=request.app.state.settings.reports_dir,
-        transcripts_dir=request.app.state.settings.data_dir / "transcripts",
-    )
+    ctx = _new_context(request.app, conv)
     try:
         flow = build_geo_graph(router_model=request.app.state.settings.router_model or None)
         _, payload = await flow.run(ctx, payload=body.content)
@@ -178,19 +193,10 @@ async def chat_ws(websocket: WebSocket, conversation_id: str) -> None:
         await websocket.close(code=4404)
         return
 
-    session = ConversationSession(store=store, conversation_id=conversation_id)
-    ctx = ConversationContext(
-        conversation_id=conversation_id,
-        session=session,
-        model=conv["model"],
-        llm=app.state.llm,
-        store=store,
-        memory=NoopMemory(),
+    ctx = _new_context(
+        app,
+        conv,
         event_sink=lambda event: _ws_send(websocket, event),
-        skills=app.state.skills,
-        pg=app.state.pg,
-        reports_dir=app.state.settings.reports_dir,
-        transcripts_dir=app.state.settings.data_dir / "transcripts",
     )
     try:
         while True:

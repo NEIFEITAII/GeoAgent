@@ -5,6 +5,7 @@ from urllib.parse import quote
 import pytest
 from fastapi.testclient import TestClient
 
+from geoagent.server.routes import _new_context
 from geoagent.server.app import create_app
 
 
@@ -113,3 +114,21 @@ def test_rollback_last_user_turn(client):
 
     messages = client.get(f"/api/conversations/{cid}/messages").json()["messages"]
     assert messages == []
+
+
+def test_conversation_context_restores_history_for_new_connection(client):
+    """新连接/新请求创建的上下文应载入已持久化历史（断线重连后续聊）。"""
+    created = client.post("/api/conversations", json={"title": "续聊"}).json()
+    cid = created["id"]
+    store = client.app.state.store
+    store.add_message(cid, {"role": "user", "content": "之前的问题"})
+    store.add_message(cid, {"role": "assistant", "content": "之前的回答"})
+
+    ctx = _new_context(client.app, store.get(cid))
+
+    assert ctx.conversation_id == cid
+    assert [m["content"] for m in ctx.session.history()] == [
+        "之前的问题",
+        "之前的回答",
+    ]
+    assert ctx.model == created["model"]
