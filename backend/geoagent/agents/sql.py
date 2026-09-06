@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from ..core.agent import Agent
+from ..tools.chart import get_chart_tools
 from ..tools.pg import get_sql_tools
 from ..tools.report import get_report_tools
 from ..tools.registry import Tool
@@ -74,7 +75,18 @@ SQL_SYSTEM_PROMPT = (
     "问题匹配上述模式时，调用一次工具并展示其结果即可。\n\n"
     "## 6. 快报生成\n"
     "用户要求生成快报/简报/总结报告时：先 load_skill(\"land-report\")，"
-    "再调用一次 generate_briefing，最后告知用户文件下载地址与关键指标。\n"
+    "再调用一次 generate_briefing，最后告知用户文件下载地址与关键指标。\n\n"
+    "## 7. 图表输出（make_chart）\n"
+    "拿到分类统计结果后，遇到以下问题应调用 make_chart 生成图表，"
+    "再在正文给出结论：\n"
+    "- 构成/占比类（如“建设用地的来源构成”“耕地流向哪几类、各占多少比例”）"
+    "→ pie 饼图，labels 为地类/来源名称，values 为对应面积或图斑数；\n"
+    "- 各类别数量/面积对比（如“每种图斑类型各有多少”“分区县新增建设用地面积”）"
+    "→ bar 柱状图，Top-N 按数量降序排列更直观；\n"
+    "- 随时间/按序变化的趋势或净变化（如“各月变化图斑数量变化”“历年耕地面积变化”）"
+    "→ line 折线图。\n"
+    "图表数据必须与回答口径、单位完全一致，只从查询结果中取数；"
+    "图表是可视化的补充，正文仍要写清楚关键数字、占比、单位与结论。\n"
 )
 
 
@@ -91,7 +103,7 @@ class SQLAgent(Agent):
             system_prompt=SQL_SYSTEM_PROMPT,
             tools=tools
             if tools is not None
-            else get_sql_tools() + get_report_tools() + get_stat_tools(),
+            else get_sql_tools() + get_report_tools() + get_stat_tools() + get_chart_tools(),
             model=model,
             max_turns=12,
         )

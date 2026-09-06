@@ -55,7 +55,7 @@ uv run --env-file .env uvicorn geoagent.server.app:app --reload --port 8000
 | `token` | 服务端→客户端 | `delta` | 流式增量文本 |
 | `tool_call` | 服务端→客户端 | `id`, `name`, `arguments` | 正在调用工具 |
 | `tool_result` | 服务端→客户端 | `id`, `name`, `is_error`, `content` | 工具执行结果（摘要文本） |
-| `artifact` | 服务端→客户端 | `kind`, `name`, `data` | 可视化产物（geojson / table 等） |
+| `artifact` | 服务端→客户端 | `kind`, `name`, `data` | 可视化产物（geojson / table / chart / file 等） |
 | `subagent_start` | 服务端→客户端 | `id`, `prompt` | 子 Agent 开始运行（task） |
 | `subagent_end` | 服务端→客户端 | `id`, `is_error`, `content` | 子 Agent 结束并返回最终文本 |
 | `message` | 服务端→客户端 | `role`, `content`, `model` | 最终助手消息 |
@@ -138,6 +138,10 @@ flow = Flow(router)
 | `list_tables` | 列出白名单内的可用表（含中文表名与描述） |
 | `describe_table` | 查看白名单表的列结构（information_schema） |
 | `run_sql` | 执行只读 SELECT 并返回表格 artifact（自动强制 LIMIT） |
+| `make_chart` | 生成饼图/柱状图/折线图 artifact（构成占比、类别对比、趋势变化） |
+
+构成/占比类问题用饼图、各类别数量/面积对比用柱状图、随时间变化的趋势用折线图；
+SQLAgent 提示词第 7 节已登记选型规则，图表数据必须来自查询结果并保持口径一致。
 
 受控护栏（任一不满足即拒绝并返回结构化错误）：
 

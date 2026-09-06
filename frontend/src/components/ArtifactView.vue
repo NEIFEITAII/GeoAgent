@@ -52,6 +52,9 @@
       </a>
     </div>
 
+    <!-- 图表结果（饼图 / 柱状图 / 折线图） -->
+    <ChartView v-else-if="artifact.kind === 'chart'" :artifact="artifact" />
+
     <!-- 其他类型：JSON 预览 -->
     <pre v-else class="artifact-json">{{ JSON.stringify(artifact.data, null, 2) }}</pre>
   </div>
@@ -67,6 +70,7 @@ import { fromLonLat } from 'ol/proj'
 import OSM from 'ol/source/OSM'
 import VectorSource from 'ol/source/Vector'
 import View from 'ol/View'
+import ChartView from './ChartView.vue'
 import Icon from './Icon.vue'
 
 const props = defineProps({

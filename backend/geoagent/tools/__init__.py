@@ -5,6 +5,7 @@ from .result import Artifact, ToolResult
 # 导入各工具模块，使其中的工具在包导入时完成注册。
 from . import builtin as _builtin  # noqa: E402,F401
 from . import accessibility as _accessibility  # noqa: E402,F401
+from . import chart as _chart  # noqa: E402,F401
 from . import pg as _pg  # noqa: E402,F401
 from . import report as _report  # noqa: E402,F401
 from . import stat as _stat  # noqa: E402,F401

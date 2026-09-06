@@ -9,6 +9,7 @@ const TOOL_LABELS = {
   construction_change_summary: '建设用地变化汇总',
   top_conversions: '转换类型排行',
   generate_briefing: '生成监测快报',
+  make_chart: '生成统计图表',
   task: '委派子任务',
   list_skills: '技能列表',
   load_skill: '加载技能',

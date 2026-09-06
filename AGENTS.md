@@ -144,6 +144,7 @@ GeoAgent/
 │       │   ├── accessibility.py # 养老可达性分析工具（E2SFCA / 供需匹配）
 │       │   ├── labels.py        # 查询结果中文表头 / TBLX 中文名映射
 │       │   ├── categories.py    # TBLX→三大类 映射加载器（数据在技能资产 JSON）
+│       │   ├── chart.py         # 统计图表生成（make_chart：饼图/柱状图/折线图）
 │       │   ├── pg.py            # PostGIS 受控 SQL 查询工具层
 │       │   ├── stat.py          # 确定性统计工具（按类型/细碎/耕地流向/建设用地/转换）
 │       │   └── report.py        # 快报生成工具（generate_briefing）
@@ -266,7 +267,7 @@ GeoAgent/
   同步登记在 `backend/README.md` 与本文档的协议表中。
 - artifact 渲染：新增可视化类型时，在 `components/ArtifactView.vue` 按 `kind`
   分支渲染（geojson→OpenLayers、table→HTML 表格、file→下载链接/Word 预览、其他→
-  JSON 预览），并登记协议表。
+  JSON 预览、chart→饼图/柱状图/折线图（`ChartView.vue`）），并登记协议表。
 - 流式状态约定：`turn_start` 创建流式助手消息，`token` 逐字追加，`tool_call`
   生成工具卡片，`tool_result` 更新卡片状态，`artifact` 挂到最近的工具卡片下，
   `turn_end` 后以服务端持久化消息为准重建列表。
@@ -284,7 +285,7 @@ GeoAgent/
 | `token` | 后端→前端 | `delta` | 流式增量文本 |
 | `tool_call` | 后端→前端 | `id`, `name`, `arguments` | 正在调用工具 |
 | `tool_result` | 后端→前端 | `id`, `name`, `is_error`, `content` | 工具结果摘要 |
-| `artifact` | 后端→前端 | `kind`, `name`, `data` | 可视化产物 |
+| `artifact` | 后端→前端 | `kind`, `name`, `data` | 可视化产物（geojson / table / chart / file 等） |
 | `subagent_start` | 后端→前端 | `id`, `prompt` | 子 Agent 开始运行（task） |
 | `subagent_end` | 后端→前端 | `id`, `is_error`, `content` | 子 Agent 结束并返回最终文本 |
 | `message` | 后端→前端 | `role`, `content`, `model` | 最终助手消息 |

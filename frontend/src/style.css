@@ -850,7 +850,8 @@ button {
 }
 
 .map-card,
-.table-card {
+.table-card,
+.chart-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-panel);
@@ -945,6 +946,161 @@ button {
 
 .file-chip a.icon-link:hover {
   color: var(--accent);
+}
+
+/* ---------- 统计图表（饼图 / 柱状图 / 折线图） ---------- */
+.chart-body {
+  padding: 12px;
+}
+
+.chart-empty {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.pie-wrap {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  flex-wrap: wrap;
+}
+
+.pie {
+  width: 172px;
+  height: 172px;
+  border-radius: 50%;
+  flex: none;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+.chart-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.pie-wrap .chart-legend {
+  display: grid;
+  gap: 5px 14px;
+  flex: 1;
+  min-width: 220px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.chart-legend.inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 10px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.legend-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legend-val {
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--text-1);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar-scroll {
+  overflow-x: auto;
+}
+
+.bar-plot {
+  display: flex;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.bar-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  min-width: 38px;
+}
+
+.bar-group {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.bar-track {
+  position: relative;
+  width: 16px;
+  height: 170px;
+}
+
+.bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  min-height: 1px;
+  border-radius: 2px 2px 0 0;
+}
+
+.bar-label {
+  max-width: 100%;
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 11px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.line-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.grid-line {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.axis-text {
+  font-size: 10px;
+  fill: var(--text-3);
+}
+
+.axis-text.x {
+  font-size: 11px;
+}
+
+.line-path {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .artifact-json {
