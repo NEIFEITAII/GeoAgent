@@ -31,7 +31,7 @@ GeoAgent 是一个**通过自然语言对话完成地理空间分析与业务问
 | --- | --- | --- |
 | 后端 | Python + FastAPI + WebSocket + openai SDK，uv 管理环境 | 骨架已搭建 |
 | 数据与分析引擎 | PostgreSQL/PostGIS（土地变化检测库，当前主线）；PyQGIS（计划，worker 进程隔离） | PostGIS 受控查询层已接入（tools/pg.py） |
-| LLM | OpenAI 兼容接口，内置 qwen3.7-flash / qwen3.7-plus / qwen3.7-max-2026-06-08 | 已支持多模型切换 |
+| LLM | OpenAI 兼容接口，内置 qwen3.8-27b / qwen3.7-flash / qwen3.7-plus / qwen3.7-max-2026-06-08（默认 qwen3.8-27b） | 已支持多模型切换 |
 | 前端 | Vue3 + Vite + OpenLayers | 骨架已搭建（会话列表 + 会话窗口 + 流式工具卡片 + 内嵌地图） |
 | 存储 | 会话：JSONL（当前）→ SQLite/PostGIS（规划）；业务数据：PostgreSQL | JSONL 已可用 |
 
@@ -44,7 +44,8 @@ GeoAgent 是一个**通过自然语言对话完成地理空间分析与业务问
 - **Agent 抽象**（`core/agent.py`）：Agent 就是一个 Node，组合了系统提示词 + 工具集 +
   模型配置 + "LLM → 工具 → 再问"循环，可与其他自定义节点混编成图。
 - **多模型切换**（`core/llm.py` + `config.py`）：`ModelProfile` 注册表内置
-  qwen3.7-flash / qwen3.7-plus / qwen3.7-max-2026-06-08；支持 `OPENAI_BASE_URL` 全局覆盖；
+  qwen3.8-27b / qwen3.7-flash / qwen3.7-plus / qwen3.7-max-2026-06-08
+  （默认 qwen3.8-27b）；支持 `OPENAI_BASE_URL` 全局覆盖；
   每个会话可通过 REST 接口随时切换模型。
 - **工具系统**（`tools/`）：装饰器注册 + Pydantic 参数校验自动生成 LLM schema；
   异步执行器返回结构化错误；`ToolResult` 同时携带给 LLM 的文本 `content` 和
@@ -308,7 +309,7 @@ npm run dev           # http://localhost:5173
 ```env
 OPENAI_API_KEY=sk-xxxx
 OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-GEOAGENT_DEFAULT_MODEL=qwen3.7-max-2026-06-08
+GEOAGENT_DEFAULT_MODEL=qwen3.8-27b
 
 # 土地变化检测库（PostgreSQL/PostGIS）
 GEOAGENT_PG_DSN=postgresql://user:pass@127.0.0.1:5432/land_change

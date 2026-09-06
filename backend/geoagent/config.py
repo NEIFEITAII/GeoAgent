@@ -50,6 +50,13 @@ class ModelProfile:
 def default_model_registry() -> dict[str, ModelProfile]:
     """内置模型注册表。新增模型时在此追加一个 ModelProfile。"""
     return {
+        "qwen3.8-27b": ModelProfile(
+            id="qwen3.8-27b",
+            provider="openai_compatible",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            api_key_env="OPENAI_API_KEY",
+            description="Alibaba Qwen3.8-27B (DashScope)",
+        ),
         "qwen3.7-flash": ModelProfile(
             id="qwen3.7-flash",
             provider="openai_compatible",
@@ -80,7 +87,7 @@ class Settings:
     def __init__(self) -> None:
         default_data_dir = Path(__file__).resolve().parent.parent / "data"
         self.data_dir = Path(os.getenv("GEOAGENT_DATA_DIR", str(default_data_dir)))
-        self.default_model = os.getenv("GEOAGENT_DEFAULT_MODEL", "qwen3.7-plus")
+        self.default_model = os.getenv("GEOAGENT_DEFAULT_MODEL", "qwen3.8-27b")
         self.router_model = os.getenv("GEOAGENT_ROUTER_MODEL", "")
         default_skills_dir = Path(__file__).resolve().parent.parent.parent / "skills"
         self.skills_dir = Path(os.getenv("GEOAGENT_SKILLS_DIR", str(default_skills_dir)))

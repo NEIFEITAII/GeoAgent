@@ -27,9 +27,20 @@ def test_models_include_switchable_models(client):
     assert resp.status_code == 200
     models = resp.json()["models"]
     ids = {m["id"] for m in models}
-    assert {"qwen3.7-flash", "qwen3.7-plus", "qwen3.7-max-2026-06-08"} <= ids
-    assert len(ids) == 3
+    assert {"qwen3.8-27b", "qwen3.7-flash", "qwen3.7-plus", "qwen3.7-max-2026-06-08"} <= ids
+    assert len(ids) == 4
     assert all("available" in m for m in models)
+
+
+def test_default_model_is_qwen3_8_27b(tmp_path, monkeypatch):
+    monkeypatch.delenv("GEOAGENT_DEFAULT_MODEL", raising=False)
+    monkeypatch.setenv("GEOAGENT_DATA_DIR", str(tmp_path))
+    app = create_app()
+    created = TestClient(app).post(
+        "/api/conversations",
+        json={"title": "默认模型"},
+    ).json()
+    assert created["model"] == "qwen3.8-27b"
 
 
 def test_conversation_crud_and_model_switch(client):

@@ -33,7 +33,7 @@ uv run --env-file .env uvicorn geoagent.server.app:app --reload --port 8000
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/health` | 健康检查 |
-| GET | `/api/models` | 可用模型列表（含是否已配 key；已内置阿里千问 qwen3.7-flash / qwen3.7-plus） |
+| GET | `/api/models` | 可用模型列表（含是否已配 key；已内置阿里千问 qwen3.8-27b / qwen3.7-flash / qwen3.7-plus / qwen3.7-max-2026-06-08） |
 | GET/POST | `/api/conversations` | 会话列表 / 创建会话 |
 | DELETE | `/api/conversations/{id}` | 删除会话（含消息文件） |
 | GET | `/api/conversations/{id}/messages` | 历史消息（含 artifacts） |
