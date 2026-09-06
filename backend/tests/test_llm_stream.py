@@ -43,6 +43,50 @@ class _FakeClient:
     chat = SimpleNamespace(completions=_FakeCompletions())
 
 
+def _content_chunk(content: str) -> Any:
+    return SimpleNamespace(
+        choices=[SimpleNamespace(delta=SimpleNamespace(content=content, tool_calls=None))]
+    )
+
+
+async def _single_big_chunk_stream() -> AsyncIterator[Any]:
+    yield _content_chunk("本期土地变化以耕地转为建设用地为主，" * 12)
+
+
+class _BigChunkCompletions:
+    @staticmethod
+    async def create(**kwargs: Any) -> AsyncIterator[Any]:
+        return _single_big_chunk_stream()
+
+
+class _BigChunkClient:
+    chat = SimpleNamespace(completions=_BigChunkCompletions())
+
+
+class _NonStreamingCompletions:
+    """模拟不支持流式的兼容端点：stream=True 直接报错，非流式可用。"""
+
+    @staticmethod
+    async def create(**kwargs: Any) -> Any:
+        if kwargs.get("stream"):
+            raise RuntimeError("streaming is not supported by this endpoint")
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="结论：新增建设用地 12000.5 平方米，其中耕地转入占 45.2%。",
+                        tool_calls=None,
+                        reasoning_content=None,
+                    )
+                )
+            ]
+        )
+
+
+class _NonStreamingClient:
+    chat = SimpleNamespace(completions=_NonStreamingCompletions())
+
+
 @pytest.mark.asyncio
 async def test_stream_chat_does_not_merge_or_duplicate_tool_call_names(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
@@ -56,3 +100,48 @@ async def test_stream_chat_does_not_merge_or_duplicate_tool_call_names(monkeypat
     assert [tc.name for tc in message.tool_calls] == ["run_sql", "summarize_by_type"]
     assert [tc.id for tc in message.tool_calls] == ["c1", "c2"]
     assert message.tool_calls[0].arguments == {"sql": "SELECT 1"}
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_splits_big_upstream_chunks_before_forwarding(monkeypatch):
+    """上游一次推大段文本时，仍切成小段转发，保证前端逐字追加的观感。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    settings = Settings()
+    service = LLMService(settings)
+    service._client = lambda profile: _BigChunkClient()  # type: ignore[method-assign]
+    tokens: list[str] = []
+
+    async def collect(delta: str) -> None:
+        tokens.append(delta)
+
+    message = await service.stream_chat(
+        model=settings.default_model,
+        messages=[{"role": "user", "content": "统计本期变化"}],
+        on_token=collect,
+    )
+    assert message.tool_calls == []
+    assert "".join(tokens) == message.content
+    assert len(tokens) > 10  # 大段文本已被拆开
+    assert all(len(t) <= 12 for t in tokens)
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_falls_back_to_non_streaming_and_forwards_text(monkeypatch):
+    """接口不支持流式时回退非流式调用，正文仍以小段 token 转发，不丢失回复。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    settings = Settings()
+    service = LLMService(settings)
+    service._client = lambda profile: _NonStreamingClient()  # type: ignore[method-assign]
+    tokens: list[str] = []
+
+    async def collect(delta: str) -> None:
+        tokens.append(delta)
+
+    message = await service.stream_chat(
+        model=settings.default_model,
+        messages=[{"role": "user", "content": "统计新增建设用地"}],
+        on_token=collect,
+    )
+    assert message.content.startswith("结论：新增建设用地")
+    assert "".join(tokens) == message.content
+    assert all(len(t) <= 12 for t in tokens)

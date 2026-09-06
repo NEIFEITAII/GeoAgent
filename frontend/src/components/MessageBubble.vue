@@ -33,7 +33,11 @@
       </div>
     </div>
 
-    <div v-else-if="message.role === 'assistant'" class="assistant-card">
+    <div
+      v-else-if="message.role === 'assistant'"
+      class="assistant-card"
+      :class="{ expanded }"
+    >
       <div v-if="docFiles.length || message.route" class="card-toolbar">
         <button
           v-for="f in docFiles"
@@ -58,15 +62,13 @@
         <span v-if="message.route" class="scene-badge" :class="message.route">
           {{ routeLabel(message.route) }}
         </span>
-      </div>
-
-      <div class="assistant-body">
-        <div v-if="!message.content && message.streaming" class="thinking">
-          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-        </div>
-        <template v-else>
-          {{ message.content }}<span v-if="message.streaming" class="cursor" />
-        </template>
+        <button
+          class="mini-btn card-expand"
+          :title="expanded ? '恢复为三分之二宽度' : '撑满消息区'"
+          @click="expanded = !expanded"
+        >
+          <Icon :name="expanded ? 'shrink' : 'expand'" :size="14" />
+        </button>
       </div>
 
       <div v-for="s in message.subagents || []" :key="s.id" class="subagent" :class="s.status">
@@ -83,6 +85,16 @@
 
       <div v-if="message.toolCalls?.length" class="tool-calls">
         <ToolCallCard v-for="c in message.toolCalls" :key="c.id" :call="c" />
+      </div>
+
+      <!-- 正文放在卡片之后：卡片负责展示数据，正文是卡片之上的结论式总结 -->
+      <div class="assistant-body">
+        <div v-if="!message.content && message.streaming" class="thinking">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        </div>
+        <template v-else>
+          {{ message.content }}<span v-if="message.streaming" class="cursor" />
+        </template>
       </div>
     </div>
 
@@ -126,6 +138,7 @@ const props = defineProps({
 
 const previewing = ref(null)
 const editing = ref(false)
+const expanded = ref(false)
 const editDraft = ref('')
 const copied = ref(false)
 const editInput = ref(null)

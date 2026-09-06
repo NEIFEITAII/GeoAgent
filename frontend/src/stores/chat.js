@@ -41,7 +41,9 @@ function buildRenderMessages(rawMessages) {
       assistant = {
         id: uid(),
         role: 'assistant',
-        content: m.content || '',
+        // 带工具调用的 assistant 消息里的文字只是过程话术，正文由紧随其后的
+        // 最终 assistant 消息展示，这里不再重复显示，避免与工具卡片抢版面。
+        content: (m.tool_calls || []).length ? '' : m.content || '',
         streaming: false,
         route: m.route || '',
         subagents: Array.isArray(m.subagents) ? m.subagents : [],
@@ -121,6 +123,7 @@ function handleEvent(event) {
         content: '',
         streaming: true,
         route: '',
+        sawTool: false,
         subagents: [],
         toolCalls: [],
         artifacts: [],
@@ -153,6 +156,12 @@ function handleEvent(event) {
       break
     case 'tool_call':
       if (chat._streamAssistant) {
+        // 工具调用开始后，前面可能已流出的是模型"准备查询"的过程话术，
+        // 不作为最终回复展示，避免过程话术与工具执行后流式输出的结论正文混在一起。
+        if (!chat._streamAssistant.sawTool) {
+          chat._streamAssistant.content = ''
+          chat._streamAssistant.sawTool = true
+        }
         chat._streamAssistant.toolCalls.push({
           id: event.id,
           name: event.name,

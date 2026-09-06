@@ -164,6 +164,23 @@ class LLMService:
 
         content_parts: list[str] = []
         tool_slots: dict[int, dict[str, Any]] = {}
+        # 前端逐字渲染的最小转发粒度：无论上游一次推多大一段，都切成小段转发，
+        # 避免"卡片先出、正文结尾才一次性冒出来"的观感。
+        token_chunk_size = 12
+        pending_text = ""
+
+        async def _emit_tokens(delta: str) -> None:
+            """把上游文本分片切小后逐段转发给 on_token。"""
+            nonlocal pending_text
+            pending_text += delta
+            while len(pending_text) >= token_chunk_size:
+                piece, pending_text = (
+                    pending_text[:token_chunk_size],
+                    pending_text[token_chunk_size:],
+                )
+                if on_token is not None:
+                    await on_token(piece)
+
         try:
             stream = await client.chat.completions.create(**kwargs)
             async for chunk in stream:
@@ -172,8 +189,7 @@ class LLMService:
                 delta = chunk.choices[0].delta
                 if delta and delta.content:
                     content_parts.append(delta.content)
-                    if on_token is not None:
-                        await on_token(delta.content)
+                    await _emit_tokens(delta.content)
                 for tc in delta.tool_calls or []:
                     # 用流内 index（缺失时退回 id）作为槽位，避免多个工具调用挤进同一槽。
                     index = getattr(tc, "index", None)
@@ -191,17 +207,28 @@ class LLMService:
                             slot["function"]["name"] = name
                         if tc.function.arguments:
                             slot["function"]["arguments"] += tc.function.arguments
+            if pending_text and on_token is not None:
+                await on_token(pending_text)
         except Exception:
             if content_parts or tool_slots:
+                # 已推送过部分内容时不再整体回退，避免与已流出的片段重复；
+                # 先把缓冲里的尾段发出去再抛错，让前端保留已见到的正文。
+                if pending_text and on_token is not None:
+                    await on_token(pending_text)
                 raise
-            # 部分提供商不支持流式（例如带工具时），回退到非流式调用。
-            return await self.chat(
+            # 部分提供商不支持流式（例如带工具时），回退到非流式调用；
+            # 正文仍然切成小段转发，保证前端体验与真实流式一致。
+            message = await self.chat(
                 model=model,
                 messages=messages,
                 tools=tools,
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
+            if on_token is not None and message.content:
+                for i in range(0, len(message.content), token_chunk_size):
+                    await on_token(message.content[i : i + token_chunk_size])
+            return message
 
         tool_calls = []
         for slot in tool_slots.values():

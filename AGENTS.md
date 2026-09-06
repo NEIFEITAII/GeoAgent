@@ -72,13 +72,17 @@ GeoAgent 是一个**通过自然语言对话完成地理空间分析与业务问
   "查询 → 分析 → 问答"，路由目标 `sql`；白名单 = 图斑主表 + 图斑类型字典
   `dict_tblx` + 合并地类字典表 `dict_land_classification_summary`（编码/名称/一级类/
   三大类），提示词只描述表结构与口径规则，数据知识由模型按需 JOIN/查询；
+  提示词第 7 节约定卡片（表格/图表）负责展示明细、正文只给结论式总结，
+  避免复述卡片数据；
   `scripts/eval_sql_agent.py` 提供 7 个 golden 用例做准确率回归。
 - **确定性统计工具**（`tools/stat.py`）：`summarize_by_type` / `fragment_stats` /
   `farmland_flow_summary` / `construction_change_summary` / `top_conversions`，
-  后端预写 SQL 固化 join、口径与合计，模型只调用并复述结果，提升统计稳定性；
+  后端预写 SQL 固化 join、口径与合计，模型只调用并依据结果给出结论式回答，
+  提升统计稳定性；
   前后时项比较统一在三大类层面（前时项走三调三级映射，后时项走 TBLX 模糊映射）。
 - **LLM 层稳定性**（`core/llm.py`）：流式工具调用按 index/id 分槽、名称去重，修复
-  工具名粘连（run_sqlrun_sql）问题；Agent 空回复自动重试一次。
+  工具名粘连（run_sqlrun_sql）问题；流式正文统一切成小段转发，上游不支持流式时
+  回退一次性补全并按小段回放，保证前端逐字追加效果；Agent 空回复自动重试一次。
 - **土地变化监测快报**（`skills/land-report/` + `report/briefing.py` +
   `tools/report.py`）：`generate_briefing` 工具按默认模板生成 Word 快报（全库
   统计、输出到仓库外目录，默认 `%LOCALAPPDATA%/GeoAgent/reports`，可用
@@ -98,7 +102,9 @@ GeoAgent 是一个**通过自然语言对话完成地理空间分析与业务问
   token / 路由 / 工具调用卡片（运行中/完成/失败）；GeoJSON 用 OpenLayers
   内嵌小地图渲染、表格用 HTML 表格渲染；会话级模型切换下拉框；Vite 代理
   `/api`（含 WebSocket）到后端，前端不硬编码后端地址；工具卡片按中文名展示
-  （`src/toolLabels.js`），文件类 artifact 支持下载与 Word 预览。
+  （`src/toolLabels.js`），文件类 artifact 支持下载与 Word 预览；
+  工具调用开始后清掉此前流出的过程话术，正文只保留工具执行后的结论流式输出，
+  并展示在工具卡片之后。
 
 ### 近期主线（按顺序推进）
 

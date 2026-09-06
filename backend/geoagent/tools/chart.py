@@ -109,7 +109,9 @@ def make_chart(
         name="make_chart",
         content=(
             f"图表已生成：{title}（{CHART_TYPE_LABELS[chart_type]}，"
-            f"{n} 个分类）。请在最终回答中给出结论与单位。"
+            f"{n} 个分类），并已作为卡片渲染到会话窗口。最终回答只给结论式总结："
+            "关键数字带单位出现一次即可，再点出最值得注意的要点，"
+            "不要逐项复述图表中的 labels/values。"
         ),
         artifacts=[Artifact(kind="chart", name=title, data=data)],
     )
