@@ -10,20 +10,14 @@ from .llm import AssistantMessage
 from .node import Node
 
 
-# 所有 Agent 统一追加的规划引导（英文，见 AGENTS.md 语言约定）。
-BUILTIN_TOOL_GUIDANCE = (
-    "\n\nDelegate large, self-contained subtasks to a subagent with the task tool to keep "
-    "this conversation focused. "
-    "Use list_skills to see available skills, and load_skill to read their full "
-    "instructions when the task requires specialized knowledge."
-)
-
-
 class Agent(Node):
     """自包含的智能体：系统提示词 + 工具集 + 模型配置 + LLM 工具循环。
 
     Agent *本身* 就是一个 Node，因此不同功能的 Agent 可以与自定义节点
     （例如路由器）通过 `- "action" >>` 语法组合成图。
+
+    内置工具（task / list_skills / load_skill / compact）的用途由各自的工具 description
+    承担，技能目录由 SkillLoader.catalog_prompt() 在调用前追加，不在提示词里复述。
     """
 
     def __init__(
@@ -36,7 +30,7 @@ class Agent(Node):
         temperature: Optional[float] = None,
     ) -> None:
         super().__init__(name=name)
-        self.system_prompt = f"{system_prompt}\n{BUILTIN_TOOL_GUIDANCE}".strip()
+        self.system_prompt = system_prompt.strip()
         base_tools = list(tools or [])
         base_names = {t.name for t in base_tools}
         self.tools = base_tools + [

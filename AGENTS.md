@@ -72,7 +72,7 @@ GeoAgent 是一个**通过自然语言对话完成地理空间分析与业务问
   "查询 → 分析 → 问答"，路由目标 `sql`；白名单 = 图斑主表 + 图斑类型字典
   `dict_tblx` + 合并地类字典表 `dict_land_classification_summary`（编码/名称/一级类/
   三大类），提示词只描述表结构与口径规则，数据知识由模型按需 JOIN/查询；
-  提示词第 7 节约定卡片（表格/图表）负责展示明细、正文只给结论式总结，
+  提示词第 6 节约定卡片（表格/图表）负责展示明细、正文只给结论式总结，
   避免复述卡片数据；
   `scripts/eval_sql_agent.py` 提供 7 个 golden 用例做准确率回归。
 - **确定性统计工具**（`tools/stat.py`）：`summarize_by_type` / `fragment_stats` /
@@ -234,6 +234,10 @@ GeoAgent/
   4. SQL 查询类工具必须走受控执行层（见 4.2），不得裸执行 LLM 生成的任意 SQL。
   5. 高频/明确口径的统计模式建议做成**确定性工具**（参考 `tools/stat.py`：后端预写
      SQL、Pydantic 参数、返回中文表格 artifact），并在 SQLAgent 提示词第 5 节登记。
+  6. 工具的"是什么、参数怎么填、适用哪类问题"只写在注册的 description / 参数
+     description 里（调用时随 `tools` 参数下发）；system prompt **不复述**工具说明，
+     只写 schema 表达不了的策略（口径默认值、工具优先级、正文与卡片分工等），
+     避免同一件事两处维护、改工具时提示词变成过期信息。
   所有 Agent 共享的内置工具（task / list_skills / load_skill / compact）统一放在
   `tools/builtin.py`，在 `core/agent.py` 中自动合并，业务工具不要与内置工具重名。
   新增内置工具时同步更新本文档与 `backend/README.md` 的协议表。
