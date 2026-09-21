@@ -86,11 +86,13 @@ class Settings:
 
     def __init__(self) -> None:
         default_data_dir = Path(__file__).resolve().parent.parent / "data"
-        self.data_dir = Path(os.getenv("GEOAGENT_DATA_DIR", str(default_data_dir)))
+        configured_data_dir = os.getenv("GEOAGENT_DATA_DIR", "").strip()
+        self.data_dir = Path(configured_data_dir) if configured_data_dir else default_data_dir
         self.default_model = os.getenv("GEOAGENT_DEFAULT_MODEL", "qwen3.8-27b")
         self.router_model = os.getenv("GEOAGENT_ROUTER_MODEL", "")
         default_skills_dir = Path(__file__).resolve().parent.parent.parent / "skills"
-        self.skills_dir = Path(os.getenv("GEOAGENT_SKILLS_DIR", str(default_skills_dir)))
+        configured_skills_dir = os.getenv("GEOAGENT_SKILLS_DIR", "").strip()
+        self.skills_dir = Path(configured_skills_dir) if configured_skills_dir else default_skills_dir
         self.model_registry = default_model_registry()
         # PostgreSQL/PostGIS 土地变化检测库（受控只读访问，连接串来自环境变量）。
         self.pg_dsn = os.getenv("GEOAGENT_PG_DSN", "").strip()

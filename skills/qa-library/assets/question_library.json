@@ -1,0 +1,438 @@
+{
+  "name": "land-change-qa-library",
+  "version": "1.0",
+  "description": "2026 年第一期地类变化图斑表 标准问题库 + SQL/工具示例（智能问数系统报表查询依据）",
+  "table": "data.\"2026_1_change_landuse\"",
+  "notes": [
+    "原土地类型 = DLBM/DLMC（三调二级类）；图斑类型（变化后） = TBLX（影像编码）",
+    "面积 MJ 单位平方米；耕地(原)=DLBM LIKE '01%'；耕地(现)=TBLX IN ('01','1')",
+    "原三调建设用地(含扩展码) canonical 过滤：DLBM ~ '^(05|06|07|08|09|100[1-5]|100[7-9]|1109|1201)'",
+    "TBLX→三大类映射以 skills/land-report/assets/tblx_categories.json 为准：",
+    "  农用地=01-04/ND/KT/SK/GQ；建设用地=20/YH/DT/TD/DL1/DL2/DL3/TL/SJ/CK/YT/WL/TP/GF/LD/JC/ZQC/GEF/TH；未利用地=SM/HL/LT/LY/WH/QT",
+    "strategy=tool 表示优先调用确定性统计工具（SQL 由后端固化，更稳定）；",
+    "strategy=sql 表示用 run_sql 执行参考 SQL；每个条目均附参考 SQL 作为口径依据"
+  ],
+  "entries": [
+    {
+      "id": "total_summary",
+      "question": "全库共有多少个变化图斑、总面积是多少",
+      "aliases": [
+        "一共有多少图斑",
+        "总共多少",
+        "总面积是多少",
+        "全部图斑的总量"
+      ],
+      "keywords": [
+        "总数",
+        "总面积",
+        "合计",
+        "总量",
+        "全部",
+        "全库"
+      ],
+      "intent": "全库图斑总数与总面积",
+      "strategy": "tool",
+      "tool": "summarize_by_type",
+      "sql": "SELECT count(*) AS n, sum(\"MJ\") AS area FROM data.\"2026_1_change_landuse\"",
+      "unit": "平方米",
+      "answer_hint": "总数与总面积必须来自该汇总查询，勿把显示的分组相加"
+    },
+    {
+      "id": "by_type_summary",
+      "question": "计算每种图斑类型的图斑数量和总面积",
+      "aliases": [
+        "每种类型的总面积",
+        "按图斑类型汇总",
+        "各类型面积",
+        "每种类型有多少"
+      ],
+      "keywords": [
+        "每种",
+        "类型",
+        "汇总",
+        "总面积",
+        "图斑类型"
+      ],
+      "intent": "按图斑类型（变化后 TBLX）汇总数量与面积",
+      "strategy": "tool",
+      "tool": "summarize_by_type",
+      "sql": "SELECT t.\"TBLX\", count(*) AS n, sum(t.\"MJ\") AS area_m2 FROM data.\"2026_1_change_landuse\" t GROUP BY t.\"TBLX\" ORDER BY area_m2 DESC",
+      "unit": "平方米",
+      "answer_hint": "“每种类型”默认指图斑类型（变化后）；完整明细由表格卡片展示，正文只做结论式总结"
+    },
+    {
+      "id": "orig_farmland",
+      "question": "筛选出所有耕地图斑，统计其图斑数量和总面积",
+      "aliases": [
+        "耕地有多少",
+        "耕地面积",
+        "原耕地数量"
+      ],
+      "keywords": [
+        "耕地",
+        "筛选",
+        "图斑数量",
+        "总面积"
+      ],
+      "intent": "变化前为耕地（原土地类型 DLBM 01%）的数量与面积",
+      "strategy": "sql",
+      "tool": "",
+      "sql": "SELECT count(*) AS n, sum(\"MJ\") AS area_m2 FROM data.\"2026_1_change_landuse\" WHERE \"DLBM\" LIKE '01%'",
+      "unit": "平方米",
+      "answer_hint": "耕地无修饰时指原土地类型（DLBM 01%），需说明口径"
+    },
+    {
+      "id": "current_farmland",
+      "question": "统计变化后为耕地的图斑数量和总面积",
+      "aliases": [
+        "变化后耕地",
+        "现在为耕地的图斑",
+        "现状耕地"
+      ],
+      "keywords": [
+        "变化后",
+        "耕地",
+        "图斑类型",
+        "现状"
+      ],
+      "intent": "变化后为耕地（图斑类型 TBLX 01/1）的数量与面积",
+      "strategy": "sql",
+      "tool": "",
+      "sql": "SELECT count(*) AS n, sum(\"MJ\") AS area_m2 FROM data.\"2026_1_change_landuse\" WHERE \"TBLX\" IN ('01','1')",
+      "unit": "平方米",
+      "answer_hint": "“变化后为耕地”指 TBLX='01'（数据可能含 '1' 写法）"
+    },
+    {
+      "id": "farmland_flow",
+      "question": "耕地流出、流入与净变化是多少，流向哪里、从哪里来",
+      "aliases": [
+        "耕地流向",
+        "耕地流出流入",
+        "耕地净变化"
+      ],
+      "keywords": [
+        "耕地",
+        "流出",
+        "流入",
+        "净变化",
+        "流向",
+        "来源"
+      ],
+      "intent": "耕地前后流向确定性汇总（流出/流入/净变化 + 方向与来源构成）",
+      "strategy": "tool",
+      "tool": "farmland_flow_summary",
+      "sql": "SELECT count(*) AS n, sum(\"MJ\") AS area FROM data.\"2026_1_change_landuse\" WHERE \"DLBM\" LIKE '01%'",
+      "unit": "平方米",
+      "answer_hint": "一次调用 farmland_flow_summary 即可；流向按三大类（前=三调，后=模糊映射）"
+    },
+    {
+      "id": "farmland_to_construction",
+      "question": "原耕地流向建设用地的面积是多少",
+      "aliases": [
+        "耕地转建设用地",
+        "耕地变为建设用地",
+        "占用耕地建设"
+      ],
+      "keywords": [
+        "耕地",
+        "建设用地",
+        "转",
+        "流向",
+        "占用"
+      ],
+      "intent": "原耕地(DLBM 01%) 且变化后为建设用地(TBLX∈建设模糊集) 的数量与面积",
+      "strategy": "sql",
+      "tool": "",
+      "sql": "SELECT count(*) AS n, sum(\"MJ\") AS area FROM data.\"2026_1_change_landuse\" WHERE \"DLBM\" LIKE '01%' AND \"TBLX\" IN ('20','YH','DT','TD','DL1','DL2','DL3','TL','SJ','CK','YT','WL','TP','GF','LD','JC','ZQC','GEF','TH')",
+      "unit": "平方米",
+      "answer_hint": "建设用地代码集合以 tblx_categories.json 为准；也可用 construction_change_summary 的“其中原耕地”项"
+    },
+    {
+      "id": "construction_change",
+      "question": "新增建设用地有多少，来自哪里、分布在哪些县",
+      "aliases": [
+        "建设用地新增",
+        "新增建设用地面积",
+        "建设用地来源构成"
+      ],
+      "keywords": [
+        "建设用地",
+        "新增",
+        "来源",
+        "分县",
+        "构成"
+      ],
+      "intent": "新增建设用地（后时项 TBLX 模糊映射）汇总/分县/来源构成",
+      "strategy": "tool",
+      "tool": "construction_change_summary",
+      "sql": "SELECT count(*) AS n, sum(\"MJ\") AS area FROM data.\"2026_1_change_landuse\" WHERE \"TBLX\" IN ('20','YH','DT','TD','DL1','DL2','DL3','TL','SJ','CK','YT','WL','TP','GF','LD','JC','ZQC','GEF','TH')",
+      "unit": "平方米",
+      "answer_hint": "一次调用 construction_change_summary 即可；分县表格默认取面积前 10"
+    },
+    {
+      "id": "fragment_stats",
+      "question": "面积小于某阈值的细碎图斑有多少、占比多大",
+      "aliases": [
+        "细碎图斑",
+        "小面积图斑",
+        "面积小于X平方米的图斑"
+      ],
+      "keywords": [
+        "细碎",
+        "小于",
+        "阈值",
+        "占比",
+        "面积"
+      ],
+      "intent": "面积(MJ)小于阈值的图斑数量与占全库数量/面积的比例",
+      "strategy": "tool",
+      "tool": "fragment_stats",
+      "sql": "SELECT count(*) AS n, sum(\"MJ\") AS area FROM data.\"2026_1_change_landuse\" WHERE \"MJ\" < 100",
+      "unit": "平方米",
+      "answer_hint": "调用 fragment_stats(threshold_m2=X)；注意数据面积值域 50-200，阈值≤50 恒为 0"
+    },
+    {
+      "id": "top_conversions",
+      "question": "变化面积最大的转换类型有哪些（如耕地→建设用地）",
+      "aliases": [
+        "转换类型排行",
+        "变化最大的类型",
+        "地类转换 Top"
+      ],
+      "keywords": [
+        "转换",
+        "变化面积",
+        "排行",
+        "Top",
+        "最大"
+      ],
+      "intent": "原一级类→现三大类（模糊映射）转换面积 Top-N",
+      "strategy": "tool",
+      "tool": "top_conversions",
+      "sql": "SELECT COALESCE(d.\"YJLMC\",'其他') AS original, CASE WHEN t.\"TBLX\" IN ('20','YH','DT','TD','DL1','DL2','DL3','TL','SJ','CK','YT','WL','TP','GF','LD','JC','ZQC','GEF','TH') THEN '建设用地' WHEN t.\"TBLX\" IN ('01','02','03','04','ND','KT','SK','GQ') THEN '农用地' ELSE '其他' END AS current, count(*) AS n, sum(t.\"MJ\") AS area FROM data.\"2026_1_change_landuse\" t LEFT JOIN knowledge_base.dict_land_classification_summary d ON t.\"DLBM\" = d.\"DLBM\" GROUP BY 1,2 ORDER BY area DESC LIMIT 10",
+      "unit": "平方米",
+      "answer_hint": "一次调用 top_conversions(top_n=N) 即可"
+    },
+    {
+      "id": "max_polygon",
+      "question": "找出面积最大的单个图斑，说明其图斑类型和所在行政区",
+      "aliases": [
+        "最大图斑",
+        "面积最大的图斑",
+        "单块最大"
+      ],
+      "keywords": [
+        "最大",
+        "图斑",
+        "面积",
+        "行政区"
+      ],
+      "intent": "按面积排序取单个最大图斑的明细",
+      "strategy": "sql",
+      "tool": "",
+      "sql": "SELECT \"OBJECTID\", \"XMC\", \"DLMC\", \"TBLX\", \"MJ\" FROM data.\"2026_1_change_landuse\" ORDER BY \"MJ\" DESC, \"OBJECTID\" LIMIT 1",
+      "unit": "平方米",
+      "answer_hint": "Top-N 明细用 ORDER BY \"MJ\" DESC, \"OBJECTID\" LIMIT N"
+    },
+    {
+      "id": "construction_top10",
+      "question": "按面积从大到小排序所有建设用地图斑，显示前 10 条",
+      "aliases": [
+        "建设用地前10",
+        "最大的建设用地图斑"
+      ],
+      "keywords": [
+        "建设用地",
+        "排序",
+        "前10",
+        "面积"
+      ],
+      "intent": "原三调建设用地图斑按面积 Top-10 明细",
+      "strategy": "sql",
+      "tool": "",
+      "sql": "SELECT \"OBJECTID\", \"XMC\", \"DLMC\", \"TBLX\", \"MJ\" FROM data.\"2026_1_change_landuse\" WHERE \"DLBM\" ~ '^(05|06|07|08|09|100[1-5]|100[7-9]|1109|1201)' ORDER BY \"MJ\" DESC, \"OBJECTID\" LIMIT 10",
+      "unit": "平方米",
+      "answer_hint": "建设用地无修饰指原三调建设用地（canonical 正则过滤）"
+    },
+    {
+      "id": "construction_ratio",
+      "question": "计算建设用地占总面积的百分比",
+      "aliases": [
+        "建设用地占比",
+        "建设用地比例"
+      ],
+      "keywords": [
+        "建设用地",
+        "占比",
+        "百分比",
+        "比例",
+        "总面积"
+      ],
+      "intent": "原三调建设用地面积占全库面积的百分比",
+      "strategy": "sql",
+      "tool": "",
+      "sql": "SELECT sum(\"MJ\") AS jsyd_area_m2, (SELECT sum(\"MJ\") FROM data.\"2026_1_change_landuse\") AS total_area_m2 FROM data.\"2026_1_change_landuse\" WHERE \"DLBM\" ~ '^(05|06|07|08|09|100[1-5]|100[7-9]|1109|1201)'",
+      "unit": "平方米",
+      "answer_hint": "百分比只引用查询结果列，禁止用手算"
+    },
+    {
+      "id": "by_county",
+      "question": "分区县统计变化图斑数量和总面积",
+      "aliases": [
+        "各县面积",
+        "分行政区统计",
+        "每个县有多少"
+      ],
+      "keywords": [
+        "分县",
+        "区县",
+        "行政区",
+        "统计",
+        "面积"
+      ],
+      "intent": "按县级行政区(XMC)汇总图斑数量与面积",
+      "strategy": "sql",
+      "tool": "",
+      "sql": "SELECT \"XMC\" AS region, count(*) AS n, sum(\"MJ\") AS area FROM data.\"2026_1_change_landuse\" GROUP BY \"XMC\" ORDER BY area DESC",
+      "unit": "平方米",
+      "answer_hint": "可用 construction_change_summary 的分县表获得“新增建设用地分县”"
+    },
+    {
+      "id": "list_land_types",
+      "question": "列出所有地类名称和对应的地类编码",
+      "aliases": [
+        "有哪些地类",
+        "地类编码清单",
+        "地类字典"
+      ],
+      "keywords": [
+        "地类",
+        "名称",
+        "编码",
+        "清单",
+        "列出"
+      ],
+      "intent": "查询合并地类字典的原二级类编码/名称清单",
+      "strategy": "sql",
+      "tool": "",
+      "sql": "SELECT \"DLBM\", \"DLMC\" FROM knowledge_base.dict_land_classification_summary ORDER BY \"DLBM\"",
+      "unit": "",
+      "answer_hint": "地类名称/编码来自字典表，禁止凭空编造"
+    },
+    {
+      "id": "list_tblx_types",
+      "question": "列出所有图斑类型（TBLX）的名称和编码",
+      "aliases": [
+        "图斑类型有哪些",
+        "TBLX 字典"
+      ],
+      "keywords": [
+        "图斑类型",
+        "TBLX",
+        "编码",
+        "清单",
+        "列出"
+      ],
+      "intent": "查询图斑类型字典(TBLX 编码→名称)清单",
+      "strategy": "sql",
+      "tool": "",
+      "sql": "SELECT \"TBLX\", \"TBLX_CODE\" FROM knowledge_base.dict_tblx ORDER BY \"TBLX\"",
+      "unit": "",
+      "answer_hint": "TBLX 名称必须 JOIN dict_tblx（前导零：数据 01-04 对应字典 1-4）"
+    },
+    {
+      "id": "convert_area_units",
+      "question": "将面积单位从平方米换算为公顷和亩（或反过来）",
+      "aliases": [
+        "平方米换算公顷",
+        "面积换算成亩",
+        "单位换算",
+        "平方米转公顷",
+        "亩换算成平方米"
+      ],
+      "keywords": [
+        "换算",
+        "单位",
+        "公顷",
+        "亩",
+        "平方米",
+        "转换"
+      ],
+      "intent": "面积单位换算（平方米↔公顷↔亩）",
+      "strategy": "tool",
+      "tool": "convert_area",
+      "sql": "",
+      "unit": "",
+      "answer_hint": "调用 convert_area(value=..., from_unit=...)；1公顷=10000㎡、1亩=2000/3㎡≈666.6667㎡；给整列生成新面积列时用 run_sql 乘以上述系数"
+    },
+    {
+      "id": "orig_farmland_by_county",
+      "question": "统计每个行政区的耕地总面积",
+      "aliases": [
+        "每个乡镇的耕地面积",
+        "分县耕地面积",
+        "各区县耕地面积"
+      ],
+      "keywords": [
+        "乡镇",
+        "县",
+        "行政区",
+        "耕地",
+        "面积",
+        "分"
+      ],
+      "intent": "按县级行政区(XMC)汇总耕地（原 DLBM 01%）面积（数据仅到县级，无乡镇字段）",
+      "strategy": "sql",
+      "tool": "",
+      "sql": "SELECT \"XMC\" AS region, count(*) AS n, sum(\"MJ\") AS area_m2 FROM data.\"2026_1_change_landuse\" WHERE \"DLBM\" LIKE '01%' GROUP BY \"XMC\" ORDER BY area_m2 DESC",
+      "unit": "平方米",
+      "answer_hint": "数据只有县级行政区(XZQDM/XMC)，无乡镇/村级字段：问“乡镇”时说明仅能到县级，按 XMC 分组"
+    },
+    {
+      "id": "all_type_transition",
+      "question": "计算每种地类的总流出面积、总流入面积和净变化面积",
+      "aliases": [
+        "地类转移矩阵",
+        "每种地类的流出流入",
+        "各地类净变化"
+      ],
+      "keywords": [
+        "流出",
+        "流入",
+        "净变化",
+        "每种地类",
+        "转移",
+        "矩阵"
+      ],
+      "intent": "全地类（三大类层面）流出/流入/净变化转移矩阵",
+      "strategy": "sql",
+      "tool": "",
+      "sql": "SELECT COALESCE(o.\"category\", i.\"category\") AS \"category\", COALESCE(o.outflow_m2, 0) AS outflow_m2, COALESCE(i.inflow_m2, 0) AS inflow_m2, COALESCE(i.inflow_m2, 0) - COALESCE(o.outflow_m2, 0) AS net_m2 FROM (SELECT CASE WHEN d.\"CATEGORY_NAME\" IS NOT NULL THEN d.\"CATEGORY_NAME\" WHEN t.\"DLBM\" ~ '^(05|06|07|08|09|100[1-5]|100[7-9]|1109|1201)' THEN '建设用地' WHEN t.\"DLBM\" LIKE '%K' OR t.\"DLBM\" IN ('1104A','1107A','1208') THEN '农用地' ELSE '其他' END AS \"category\", sum(t.\"MJ\") AS outflow_m2 FROM data.\"2026_1_change_landuse\" t LEFT JOIN knowledge_base.dict_land_classification_summary d ON t.\"DLBM\" = d.\"DLBM\" GROUP BY 1) o FULL JOIN (SELECT CASE WHEN t.\"TBLX\" IN ('20','YH','DT','TD','DL1','DL2','DL3','TL','SJ','CK','YT','WL','TP','GF','LD','JC','ZQC','GEF','TH') THEN '建设用地' WHEN t.\"TBLX\" IN ('01','02','03','04','1','2','3','4','ND','KT','SK','GQ') THEN '农用地' WHEN t.\"TBLX\" IN ('SM','HL','LT','LY','WH','QT') THEN '未利用地' ELSE '其他' END AS \"category\", sum(t.\"MJ\") AS inflow_m2 FROM data.\"2026_1_change_landuse\" t GROUP BY 1) i ON o.\"category\" = i.\"category\" ORDER BY \"category\"",
+      "unit": "平方米",
+      "answer_hint": "前(原)走三调映射、后(现)走 TBLX 模糊映射，统一到三大类才可比；净变化=流入−流出；全表均为变化图斑，流出按原地类、流入按现地类各计一次"
+    },
+    {
+      "id": "construction_source_detail",
+      "question": "计算建设用地的来源构成（分别来自哪些地类，各占多少比例）",
+      "aliases": [
+        "建设用地来源",
+        "新增建设用地来自哪些地类",
+        "建设用地来源占比"
+      ],
+      "keywords": [
+        "建设用地",
+        "来源",
+        "构成",
+        "比例",
+        "占比",
+        "来自"
+      ],
+      "intent": "新增建设用地（后时项 TBLX）的来源（原一级类）构成与占比",
+      "strategy": "sql",
+      "tool": "",
+      "sql": "SELECT COALESCE(d.\"YJLMC\", t.\"DLMC\", '其他') AS source_type, count(*) AS n, sum(t.\"MJ\") AS area_m2, round((sum(t.\"MJ\") * 100.0 / (SELECT sum(\"MJ\") FROM data.\"2026_1_change_landuse\" WHERE \"TBLX\" IN ('20','YH','DT','TD','DL1','DL2','DL3','TL','SJ','CK','YT','WL','TP','GF','LD','JC','ZQC','GEF','TH')))::numeric, 2) AS share_pct FROM data.\"2026_1_change_landuse\" t LEFT JOIN knowledge_base.dict_land_classification_summary d ON t.\"DLBM\" = d.\"DLBM\" WHERE t.\"TBLX\" IN ('20','YH','DT','TD','DL1','DL2','DL3','TL','SJ','CK','YT','WL','TP','GF','LD','JC','ZQC','GEF','TH') GROUP BY COALESCE(d.\"YJLMC\", t.\"DLMC\", '其他') ORDER BY area_m2 DESC",
+      "unit": "平方米",
+      "answer_hint": "来源按原一级类(YJLMC，如耕地/林地/园地)，占比=该来源面积/新增建设用地总面积×100；如需二级类明细把 YJLMC 换成 DLMC"
+    }
+  ]
+}

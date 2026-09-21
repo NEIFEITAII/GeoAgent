@@ -298,3 +298,4 @@ chat.deleteConversation = deleteConversation
 chat.switchModel = switchModel
 chat.editAndResend = editAndResend
 chat.sendMessage = sendMessage
+chat.refreshMessages = refreshMessages

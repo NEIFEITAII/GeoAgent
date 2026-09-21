@@ -10,6 +10,11 @@
       <span v-if="chat.streaming" class="live-badge"><span class="dot"></span>分析中</span>
     </header>
 
+    <details class="template-entry">
+      <summary>上传快报模板 · 解析JSON与问数</summary>
+      <TemplateWorkflow :key="chat.currentId" />
+    </details>
+
     <div v-if="chat.error" class="error-banner">
       <span>{{ chat.error }}</span>
       <button class="icon-btn" title="关闭" @click="chat.error = ''">
@@ -111,6 +116,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import Icon from './Icon.vue'
 import MessageBubble from './MessageBubble.vue'
+import TemplateWorkflow from './TemplateWorkflow.vue'
 import { chat } from '../stores/chat'
 import { formatWhen, shortModel } from '../display'
 
