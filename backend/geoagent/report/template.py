@@ -82,11 +82,22 @@ def _paragraph_style(paragraph: Paragraph) -> dict[str, Any]:
         matched = re.search(r"(?:Heading|标题)\s*(\d+)", style.name, re.IGNORECASE)
         if matched:
             heading_level = int(matched.group(1))
+    fmt = paragraph.paragraph_format
+    points = lambda value: round(value.pt, 2) if value is not None else None
     return {
         "style_id": style.style_id if style else None,
         "style_name": style.name if style else None,
         "heading_level": heading_level,
         "alignment": int(paragraph.alignment) if paragraph.alignment is not None else None,
+        "left_indent_pt": points(fmt.left_indent),
+        "right_indent_pt": points(fmt.right_indent),
+        "first_line_indent_pt": points(fmt.first_line_indent),
+        "space_before_pt": points(fmt.space_before),
+        "space_after_pt": points(fmt.space_after),
+        "line_spacing": points(fmt.line_spacing) if hasattr(fmt.line_spacing, "pt") else fmt.line_spacing,
+        "line_spacing_rule": int(fmt.line_spacing_rule) if fmt.line_spacing_rule is not None else None,
+        "keep_with_next": fmt.keep_with_next,
+        "page_break_before": fmt.page_break_before,
     }
 
 
@@ -99,6 +110,9 @@ def _runs(paragraph: Paragraph) -> list[dict[str, Any]]:
             "index": index, "text": text, "start": offset, "end": offset + len(text),
             "bold": run.bold, "italic": run.italic, "font_name": _font_name(run),
             "font_size_pt": run.font.size.pt if run.font.size else None,
+            "underline": run.underline,
+            "color_rgb": str(run.font.color.rgb) if run.font.color.rgb else None,
+            "highlight": int(run.font.highlight_color) if run.font.highlight_color is not None else None,
         })
         offset += len(text)
     return result
@@ -139,10 +153,23 @@ def _cell_info(cell: _Cell, block_id: str, row: int, column: int) -> dict[str, A
     tc_pr = cell._tc.tcPr
     span = tc_pr.find(W + "gridSpan") if tc_pr is not None else None
     merge = tc_pr.find(W + "vMerge") if tc_pr is not None else None
+    shading = tc_pr.find(W + "shd") if tc_pr is not None else None
+    borders = tc_pr.find(W + "tcBorders") if tc_pr is not None else None
+    margins = tc_pr.find(W + "tcMar") if tc_pr is not None else None
     return {
         "id": f"{block_id}:r{row}:c{column}", "text": cell.text, "column": column,
         "grid_span": int(span.get(W + "val", "1")) if span is not None else 1,
         "vertical_merge": merge.get(W + "val", "continue") if merge is not None else None,
+        "width_twips": round(cell.width.twips) if cell.width is not None else None,
+        "vertical_alignment": int(cell.vertical_alignment) if cell.vertical_alignment is not None else None,
+        "shading_fill": shading.get(W + "fill") if shading is not None else None,
+        "borders": {
+            edge.tag.removeprefix(W): {key.removeprefix(W): value for key, value in edge.attrib.items()}
+            for edge in borders
+        } if borders is not None else {},
+        "margins_twips": {
+            edge.tag.removeprefix(W): edge.get(W + "w") for edge in margins
+        } if margins is not None else {},
         "paragraphs": [{"text": paragraph.text, "style": _paragraph_style(paragraph),
                         "runs": _runs(paragraph)} for paragraph in cell.paragraphs],
         "locator": {"part": "word/document.xml", "block_id": block_id, "row": row, "cell": column},
@@ -583,7 +610,19 @@ def parse_docx(content: bytes, filename: str) -> dict[str, Any]:
             "id": block_id, "type": "table", "caption": previous_text,
             "table_title": table_title, "unit": unit_match.group(1) if unit_match else None,
             "context_paragraphs": list(recent_paragraphs),
-            "style": {"style_name": item.style.name if item.style else None},
+            "style": {
+                "style_name": item.style.name if item.style else None,
+                "alignment": int(item.alignment) if item.alignment is not None else None,
+                "autofit": item.autofit,
+                "grid_widths_twips": [
+                    int(grid_col.get(W + "w")) if grid_col.get(W + "w") else None
+                    for grid_col in item._tbl.tblGrid
+                ],
+                "row_heights_twips": [
+                    round(row.height.twips) if row.height is not None else None
+                    for row in item.rows
+                ],
+            },
             "header_rows": start, "column_headers": column_headers,
             "rows": rows, "fill_targets": fill_targets,
             "locator": {"part": "word/document.xml", "block_index": index},
@@ -603,7 +642,7 @@ def parse_docx(content: bytes, filename: str) -> dict[str, Any]:
     chart_anchors = _detect_chart_anchors(blocks, images)
     parsed_at = datetime.now().astimezone()
     return {
-        "schema_version": 3, "filename": filename, "sha256": sha256(content).hexdigest(),
+        "schema_version": 4, "filename": filename, "sha256": sha256(content).hexdigest(),
         "parsed_at": parsed_at.isoformat(timespec="seconds"), "report_year": REPORT_YEAR,
         "sections": sections, "blocks": blocks, "slots": slots, "images": images,
         "chart_anchors": chart_anchors,

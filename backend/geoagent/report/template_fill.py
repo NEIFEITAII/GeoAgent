@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -35,6 +37,31 @@ def _replace_range(paragraph: Paragraph, start: int, end: int, replacement: str)
         runs[index].text = ""
 
 
+def _set_cell_text(cell: Any, value: Any) -> None:
+    """在原单元格段落中改文字，保留段落、文字及单元格样式。"""
+    paragraph = cell.paragraphs[0]
+    if paragraph.runs:
+        paragraph.runs[0].text = str(value)
+        for run in paragraph.runs[1:]:
+            run.text = ""
+    else:
+        paragraph.add_run(str(value))
+    for extra in cell.paragraphs[1:]:
+        for run in extra.runs:
+            run.text = ""
+
+
+def _append_data_row(table: Table, data_start: int) -> None:
+    """扩充数据行时继承原数据行的尺寸、边框、底纹和字体。"""
+    if len(table.rows) <= data_start:
+        table.add_row()
+        return
+    row_xml = deepcopy(table.rows[-1]._tr)
+    table._tbl.append(row_xml)
+    for cell in table.rows[-1].cells:
+        _set_cell_text(cell, "")
+
+
 def refill_docx(
     template_path: str | Path,
     parsed: dict[str, Any],
@@ -42,17 +69,26 @@ def refill_docx(
     *,
     scalar_answers: dict[str, Any],
     table_answers: dict[str, list[list[Any]]] | None = None,
+    table_cell_answers: dict[str, str] | None = None,
     charts: dict[str, dict[str, Any]] | None = None,
     test_notice: str | None = None,
     text_replacements: dict[str, str] | None = None,
     remove_chart_anchors: bool = False,
 ) -> Path:
     """按 slot id 回填文本/表格，并按 chart anchor id 插入原生 Word 图表。"""
+    if sha256(Path(template_path).read_bytes()).hexdigest() != parsed["sha256"]:
+        raise ValueError("模板内容与解析时不同，请重新上传并解析后再回填。")
     document = Document(str(template_path))
     blocks = _iter_blocks(document)
     slots_by_block: dict[str, list[dict[str, Any]]] = {}
     for slot in parsed["slots"]:
         slots_by_block.setdefault(slot["block_id"], []).append(slot)
+    allowed_cells = {
+        cell_id for slot in parsed["slots"] if slot["kind"] == "table_region"
+        for cell_id in slot["target_cell_ids"]
+    }
+    if set(table_cell_answers or {}) - allowed_cells:
+        raise ValueError("表格绑定包含模板中不存在的可填单元格。")
 
     for block in parsed["blocks"]:
         block_slots = slots_by_block.get(block["id"], [])
@@ -67,6 +103,8 @@ def refill_docx(
         if paragraph_slots:
             if not isinstance(target, Paragraph):
                 raise ValueError(f"回填定位失效：{block['id']} 不是段落。")
+            if target.text != block["text"]:
+                raise ValueError(f"回填定位失效：{block['id']} 原文已变化。")
             for slot in sorted(paragraph_slots, key=lambda item: item["start"], reverse=True):
                 _replace_range(target, slot["start"], slot["end"], str(scalar_answers[slot["id"]]))
 
@@ -77,14 +115,27 @@ def refill_docx(
                 raise ValueError(f"回填定位失效：{block['id']} 不是表格。")
             start = table_slot["locator"]["data_start_row"]
             while len(target.rows) < start + len(rows):
-                target.add_row()
+                _append_data_row(target, start)
             for row_index, values in enumerate(rows, start=start):
                 cells = target.rows[row_index].cells
                 for column, value in enumerate(values[: len(cells)]):
-                    cells[column].text = str(value)
+                    _set_cell_text(cells[column], value)
             for row_index in range(start + len(rows), len(target.rows)):
                 for cell in target.rows[row_index].cells:
-                    cell.text = ""
+                    _set_cell_text(cell, "")
+        if table_slot and table_cell_answers:
+            if not isinstance(target, Table):
+                raise ValueError(f"回填定位失效：{block['id']} 不是表格。")
+            for parsed_row in block["rows"]:
+                for parsed_cell in parsed_row:
+                    cell_id = parsed_cell["id"]
+                    if cell_id not in table_cell_answers:
+                        continue
+                    locator = parsed_cell["locator"]
+                    cell = target.cell(locator["row"], locator["cell"])
+                    if cell.text != parsed_cell["text"]:
+                        raise ValueError(f"回填定位失效：{cell_id} 原文已变化。")
+                    _set_cell_text(cell, table_cell_answers[cell_id])
 
     if remove_chart_anchors:
         for anchor in parsed.get("chart_anchors", []):

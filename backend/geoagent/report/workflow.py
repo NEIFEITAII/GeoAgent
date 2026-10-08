@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+from hashlib import sha256
+import json
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +25,39 @@ REQUIRED_QUESTION_IDS = (
     "by_type_summary",
     "by_county",
 )
+
+
+def is_question_library_template(parsed: dict[str, Any]) -> bool:
+    """仅对已知示例模板开放无人值守回填，避免把相似问题误当作相同口径。"""
+    structure = [
+        ("p", block["text"]) if block["type"] == "paragraph" else (
+            "t", block.get("table_title"),
+            [header["label"] for header in block.get("column_headers", [])],
+            len(block["rows"]),
+        )
+        for block in parsed["blocks"]
+    ]
+    digest = sha256(json.dumps(structure, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+    markers = [slot["text"] for slot in parsed["slots"] if slot["kind"] == "placeholder"]
+    tables = [block for block in parsed["blocks"] if block["type"] == "table"]
+    captions = [anchor["caption"] for anchor in parsed["chart_anchors"]]
+    return (
+        parsed.get("report_year") == 2026
+        # 与 build_question_library_template 的正文和表头一致；改字句后需人工确认口径。
+        and digest == "df65700cb93128cd2f5bf5f2165d8e7e2c614492209be2faf47b2bb6038e822a"
+        and len(parsed["blocks"]) == 21
+        and markers == [
+            "{{total_n}}", "{{total_area_mu}}", "{{orig_farmland_n}}",
+            "{{orig_farmland_area_mu}}", "{{current_farmland_n}}",
+            "{{current_farmland_area_mu}}",
+        ]
+        and len(parsed["slots"]) == 8
+        and [table.get("table_title") for table in tables] == [
+            "表1 变化后图斑类型面积前10位", "表2 各县变化图斑面积前10位",
+        ]
+        and all(len(table["rows"]) == 11 for table in tables)
+        and captions == ["图1 变化后主要图斑类型面积构成", "图2 各县变化图斑面积前10位"]
+    )
 
 
 def _set_font(run: Any, name: str, size: float, *, bold: bool = False) -> None:
@@ -271,4 +306,63 @@ def fill_question_library_report(
         _style_table(document.tables[0], ["图斑类型", "图斑数量", "总面积"])
         _style_table(document.tables[1], ["县（市、区）", "图斑数量", "总面积"])
     document.save(output)
+    return output
+
+
+def fill_review_report(
+    template_path: str | Path,
+    parsed: dict[str, Any],
+    output_path: str | Path,
+    *,
+    query_started_at: datetime,
+    confirmed_scalars: dict[str, str] | None = None,
+    confirmed_table_cells: dict[str, str] | None = None,
+    reference_only: bool = False,
+) -> Path:
+    """生成结构核验版；只回填已确认数值，其余明确标为待核验。"""
+    scalar_answers = {
+        slot["id"]: "待核验"
+        for slot in parsed["slots"]
+        if slot["kind"] in {"placeholder", "dynamic_region", "dynamic_number"}
+    }
+    scalar_answers.update(confirmed_scalars or {})
+    output = refill_docx(
+        template_path,
+        parsed,
+        output_path,
+        scalar_answers=scalar_answers,
+        table_cell_answers=confirmed_table_cells,
+        test_notice=(
+            "【核验版】自由问数的回填数值仅供参考，仍需业务核实；"
+            if reference_only else
+            "【核验版】仅已保存绑定的正文和简单表格数值按原位置回填；"
+        ) + (
+            "未绑定正文标记为“待核验”，未绑定表格保持原样。"
+            "图表尚未绑定，不得作为正式业务成果使用。"
+        ),
+        text_replacements={
+            "[[SYSTEM_TIME]]": query_started_at.astimezone().strftime("%Y-%m-%d %H:%M")
+        },
+        remove_chart_anchors=True,
+    )
+    confirmed_ids = set(confirmed_scalars or {})
+    confirmed_cells = set(confirmed_table_cells or {})
+    pending = []
+    for slot in parsed["slots"]:
+        if slot["kind"] in {"placeholder", "dynamic_region", "dynamic_number"}:
+            if slot["id"] not in confirmed_ids:
+                pending.append(f'{slot["id"]} · {slot.get("context", "正文数值")[:70]}')
+        elif slot["kind"] == "table_region":
+            target_cells = set(slot.get("target_cell_ids", []))
+            if not target_cells or target_cells - confirmed_cells:
+                pending.append(f'{slot["id"]} · 表格尚未完整核实')
+    for anchor in parsed.get("chart_anchors", []):
+        pending.append(f'{anchor["id"]} · 图表数据与位置尚未绑定')
+    if pending:
+        document = Document(output)
+        document.add_heading("待核实事项", level=1)
+        document.add_paragraph("以下内容尚未取得可靠答案或未完成位置绑定，不应作为正式业务结论。")
+        for item in pending:
+            document.add_paragraph(item, style="List Bullet")
+        document.save(output)
     return output

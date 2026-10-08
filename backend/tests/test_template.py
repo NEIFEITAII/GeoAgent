@@ -96,7 +96,7 @@ def test_questions_change_with_document() -> None:
 
 def test_sections_atomic_items_and_match_stub() -> None:
     parsed = parse_docx(fixture_docx('全省耕地流入***万亩，流出***万亩'), '模板.docx')
-    assert parsed['schema_version'] == 3
+    assert parsed['schema_version'] == 4
     assert parsed['sections'][0]['heading_block'] == 'b0'
     assert parsed['blocks'][0]['section_id'] == parsed['sections'][0]['id']
     items = decompose_atomic_items(parsed)

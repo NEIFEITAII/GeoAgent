@@ -7,12 +7,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..config import Settings
+from ..core.embedding import EmbeddingService
 from ..core.llm import LLMService
+from ..knowledge.kb import KnowledgeBase
 from ..memory.store import ConversationStore
 from ..skills import SkillLoader
 from ..tools.pg import JsonlAuditSink, PgGateway
 from .routes import router
 from .template_routes import router as template_router
+from .county_routes import router as county_router
 
 
 def create_app(settings: Optional[Settings] = None) -> FastAPI:
@@ -24,10 +27,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         pg: Optional[PgGateway] = getattr(app.state, "pg", None)
         if pg is not None:
             await pg.close()
+        await app.state.knowledge.close()
 
     app = FastAPI(title="GeoAgent", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.llm = LLMService(settings)
+    app.state.embeddings = EmbeddingService(settings)
+    app.state.knowledge = KnowledgeBase(settings, app.state.embeddings)
     app.state.store = ConversationStore(settings.data_dir)
     app.state.skills = SkillLoader(settings.skills_dir)
     app.state.skills.scan()
@@ -50,6 +56,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     )
     app.include_router(router)
     app.include_router(template_router)
+    app.include_router(county_router)
 
     @app.get("/")
     async def root() -> dict[str, str]:

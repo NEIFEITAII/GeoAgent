@@ -71,6 +71,8 @@ def _new_context(
         event_sink=event_sink,
         skills=app.state.skills,
         pg=app.state.pg,
+        embeddings=app.state.embeddings,
+        knowledge=app.state.knowledge,
         reports_dir=app.state.settings.reports_dir,
         transcripts_dir=app.state.settings.data_dir / "transcripts",
     )
@@ -208,9 +210,25 @@ async def chat_ws(websocket: WebSocket, conversation_id: str) -> None:
             content = str(data.get("content", "")).strip()
             if not content:
                 continue
+            workflow = app.state.template_workflows.get(str(data.get("workflow_id", "")))
+            question = next(
+                (item for item in workflow["questions"]
+                 if item["id"] == data.get("question_id")),
+                None,
+            ) if workflow else None
+            ctx.answer_origin = (
+                "template_free"
+                if data.get("source") == "template_free"
+                and question is not None
+                and question["question"].strip() == content
+                else ""
+            )
             # 每轮开始时刷新会话的模型设置（可能已通过 REST 切换过）。
             ctx.model = store.get(conversation_id)["model"]
-            await ctx.emit(Event("turn_start", {"conversation_id": conversation_id}))
+            await ctx.emit(Event("turn_start", {
+                "conversation_id": conversation_id,
+                "answer_origin": ctx.answer_origin,
+            }))
             try:
                 flow = build_geo_graph(router_model=app.state.settings.router_model or None)
                 await flow.run(ctx, payload=content)
